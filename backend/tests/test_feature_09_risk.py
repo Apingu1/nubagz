@@ -16,8 +16,8 @@ def test_duplicate_payout_signal_and_restriction_enforcement():
         assert a.status_code==200 and b.status_code==200
         ah={'Authorization':f"Bearer {a.json()['access_token']}"};bh={'Authorization':f"Bearer {b.json()['access_token']}"}
         address='0x9999999999999999999999999999999999999999'
-        assert client.post('/api/users/payout-addresses',headers=ah,json={'address':address,'chain':'Avalanche','label':'A','make_primary':True}).status_code==200
-        assert client.post('/api/users/payout-addresses',headers=bh,json={'address':address,'chain':'Avalanche','label':'B','make_primary':True}).status_code==200
+        assert client.post('/api/users/payout-addresses',headers=ah,json={'address':address,'chain':'Avalanche','label':'Wallet A','make_primary':True}).status_code==200
+        assert client.post('/api/users/payout-addresses',headers=bh,json={'address':address,'chain':'Avalanche','label':'Wallet B','make_primary':True}).status_code==200
         risk=client.post('/api/risk/evaluate',headers=bh)
         assert risk.status_code==200
         assert risk.json()['risk_score']>=30
