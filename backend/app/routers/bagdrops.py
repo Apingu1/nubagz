@@ -6,6 +6,7 @@ from ..db import get_db
 from ..deps import get_current_user, require_admin
 from ..models import User, Project, LedgerEntry
 from ..economy_models import BagDrop, BagDropItem, BagDropClaim
+from ..risk_models import UserTrustProfile
 
 router = APIRouter(prefix="/api/bagdrops", tags=["bagdrops"])
 
@@ -44,12 +45,7 @@ def serialize(drop: BagDrop, db: Session, user_id: int | None = None):
         "funding_status": drop.funding_status,
         "funding_tx_hash": drop.funding_tx_hash,
         "claimed": claimed,
-        "items": [{
-            "asset": item.asset_symbol,
-            "amount_per_claim": str(item.amount_per_claim),
-            "funded_amount": str(item.funded_amount),
-            "distributed_amount": str(item.distributed_amount),
-        } for item in items],
+        "items": [{"asset": item.asset_symbol, "amount_per_claim": str(item.amount_per_claim), "funded_amount": str(item.funded_amount), "distributed_amount": str(item.distributed_amount)} for item in items],
         "created_at": drop.created_at.isoformat(),
     }
 
@@ -87,12 +83,10 @@ def create_bagdrop(data: BagDropCreateIn, db: Session = Depends(get_db), user: U
         if item.funded_amount < required:
             raise HTTPException(400, f"{item.asset.upper()} funding must cover {required} for all possible claims")
     drop = BagDrop(project_id=project.id, created_by_id=user.id, title=data.title, rarity=rarity, max_claims=data.max_claims, min_bag_score=data.min_bag_score, funding_tx_hash=data.funding_tx_hash, status="PENDING", funding_status="DECLARED")
-    db.add(drop)
-    db.flush()
+    db.add(drop); db.flush()
     for item in data.items:
         db.add(BagDropItem(drop_id=drop.id, asset_symbol=item.asset.upper(), amount_per_claim=item.amount_per_claim, funded_amount=item.funded_amount))
-    db.commit()
-    db.refresh(drop)
+    db.commit(); db.refresh(drop)
     return serialize(drop, db, user.id)
 
 
@@ -108,15 +102,15 @@ def activate_bagdrop(drop_id: int, db: Session = Depends(get_db), _: User = Depe
         required = Decimal(item.amount_per_claim) * Decimal(drop.max_claims)
         if Decimal(item.funded_amount) < required:
             raise HTTPException(400, f"BagDrop is underfunded for {item.asset_symbol}")
-    # Activation is an explicit admin verification step. The stored reference is never auto-trusted merely because it exists.
-    drop.funding_status = "VERIFIED"
-    drop.status = "LIVE"
-    db.commit()
+    drop.funding_status = "VERIFIED"; drop.status = "LIVE"; db.commit()
     return serialize(drop, db)
 
 
 @router.post("/{drop_id}/claim")
 def claim_bagdrop(drop_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    trust = db.query(UserTrustProfile).filter(UserTrustProfile.user_id == user.id).first()
+    if trust and trust.trust_level == "RESTRICTED":
+        raise HTTPException(403, "This account is restricted from reward claims pending trust review")
     drop = db.query(BagDrop).filter(BagDrop.id == drop_id).with_for_update().first()
     if not drop or drop.status != "LIVE" or drop.funding_status != "VERIFIED":
         raise HTTPException(404, "BagDrop is not available")
@@ -132,11 +126,8 @@ def claim_bagdrop(drop_id: int, db: Session = Depends(get_db), user: User = Depe
         remaining = Decimal(item.funded_amount) - Decimal(item.distributed_amount)
         if remaining < Decimal(item.amount_per_claim):
             raise HTTPException(409, f"{item.asset_symbol} BagDrop inventory is exhausted")
-        amount = Decimal(item.amount_per_claim)
-        item.distributed_amount = Decimal(item.distributed_amount) + amount
+        amount = Decimal(item.amount_per_claim); item.distributed_amount = Decimal(item.distributed_amount) + amount
         db.add(LedgerEntry(user_id=user.id, campaign_id=None, asset_symbol=item.asset_symbol, amount=amount, entry_type="BAGDROP_REWARD", note=f"Opened {drop.title}"))
         rewards.append({"asset": item.asset_symbol, "amount": str(amount)})
-    db.add(BagDropClaim(drop_id=drop.id, user_id=user.id))
-    drop.claims_count += 1
-    db.commit()
+    db.add(BagDropClaim(drop_id=drop.id, user_id=user.id)); drop.claims_count += 1; db.commit()
     return {"ok": True, "drop_id": drop.id, "rewards": rewards}
