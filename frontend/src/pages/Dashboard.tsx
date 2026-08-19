@@ -1,0 +1,18 @@
+import { useEffect, useState } from 'react'
+import { ArrowUpRight, Flame, Gem, Layers3, Sparkles, Trophy, Zap } from 'lucide-react'
+import { Link } from 'react-router-dom'
+import { api } from '../lib/api'
+import type { Campaign, Dashboard as DashboardType } from '../types'
+import { useAuth } from '../context/AuthContext'
+import BagCard from '../components/BagCard'
+
+export default function Dashboard(){
+ const {user}=useAuth(); const [dash,setDash]=useState<DashboardType|null>(null); const [featured,setFeatured]=useState<Campaign[]>([])
+ useEffect(()=>{Promise.all([api<DashboardType>('/users/dashboard'),api<Campaign[]>('/campaigns?featured=true')]).then(([d,c])=>{setDash(d);setFeatured(c)}).catch(()=>{})},[])
+ return <div className="page"><div className="page-head"><div><span className="eyebrow small">NUBAGZ COMMAND CENTER</span><h1>Yo, {user?.username}. <em>Keep baggin'.</em></h1><p>Your zero-deposit journey is moving. Build reputation to unlock higher-value Bagz.</p></div><Link to="/app/discover" className="btn primary">Find a Bag <ArrowUpRight size={17}/></Link></div>
+ <div className="stats-grid"><div className="stat-card"><span><Gem/>ASSETS BAGGED</span><strong>{dash?.lifetime_assets ?? '—'}</strong><small>Unique reward assets</small></div><div className="stat-card"><span><Layers3/>COMPLETED BAGZ</span><strong>{dash?.completed_bagz ?? '—'}</strong><small>{dash?.active_bagz||0} active right now</small></div><div className="stat-card hot"><span><Trophy/>BAGSCORE</span><strong>{dash?.bag_score ?? user?.bag_score}</strong><div className="score-bar"><i style={{width:`${Math.min(100,(dash?.bag_score||0)/10)}%`}}/></div></div><div className="stat-card"><span><Flame/>STREAK</span><strong>{dash?.streak_days ?? user?.streak_days}<em> days</em></strong><small>Come back tomorrow</small></div></div>
+ <div className="dash-grid"><section className="panel balance-panel"><div className="panel-head"><div><span>MY BAG</span><h2>What you've earned</h2></div><Link to="/app/bag">View all <ArrowUpRight/></Link></div>{dash?.balances?.length?<div className="asset-list">{dash.balances.slice(0,5).map((b,i)=><div className="asset-row" key={b.asset_symbol}><div className={`asset-icon a${i%4}`}>{b.asset_symbol.slice(0,2)}</div><div><strong>{b.asset_symbol}</strong><small>Available</small></div><b>{Number(b.amount).toLocaleString(undefined,{maximumFractionDigits:4})}</b></div>)}</div>:<div className="empty-state"><Sparkles/><strong>Your Bag is empty — for now.</strong><p>Complete a funded Bag to earn your first asset.</p><Link to="/app/discover">Discover Bagz</Link></div>}</section>
+ <section className="panel xp-panel"><div className="level-orb"><Zap/><strong>LVL {Math.floor((dash?.xp||0)/500)+1}</strong></div><span>BAG XP</span><h2>{dash?.xp?.toLocaleString()||0} XP</h2><div className="xp-track"><i style={{width:`${((dash?.xp||0)%500)/5}%`}}/></div><p>{500-((dash?.xp||0)%500)} XP until your next level.</p><div className="unlock"><Sparkles/><div><strong>Next unlock</strong><span>Priority access to Rare Bagz</span></div></div></section></div>
+ <div className="section-row"><div><span className="eyebrow small">HOT RIGHT NOW</span><h2>Featured Bagz</h2></div><Link to="/app/discover">View marketplace <ArrowUpRight/></Link></div><div className="cards-grid">{featured.slice(0,3).map((c,i)=><BagCard key={c.id} campaign={c} index={i}/>)}</div>
+ </div>
+}
