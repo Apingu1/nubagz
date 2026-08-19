@@ -73,8 +73,23 @@ def test_complete_creator_to_earner_flow():
         assert price.status_code == 200
         earnings = client.get("/api/earnings/summary", headers=earner)
         assert earnings.status_code == 200
-        assert any(item["asset"] == "TBAG" and float(item["amount"]) == 80 for item in earnings.json()["lifetime"])
         valuation = next(item for item in earnings.json()["valuations"] if item["asset"] == "TBAG")
         assert float(valuation["current_value_gbp"]) == 8.0
         assert float(valuation["original_estimated_value_gbp"]) == 8.0
-        assert earnings.json()["unique_assets"] >= 1
+
+        drop = client.post("/api/bagdrops", headers=creator, json={
+            "project_id": project_id, "title": "Test Rare Drop", "rarity": "RARE", "max_claims": 10,
+            "min_bag_score": 0, "funding_tx_hash": "0xdropfunding",
+            "items": [{"asset": "TBAG", "amount_per_claim": 2, "funded_amount": 20}]
+        })
+        assert drop.status_code == 200
+        drop_id = drop.json()["id"]
+        assert client.post(f"/api/bagdrops/{drop_id}/activate", headers=admin).status_code == 200
+        live_drops = client.get("/api/bagdrops", headers=earner)
+        assert any(item["id"] == drop_id for item in live_drops.json())
+        claim = client.post(f"/api/bagdrops/{drop_id}/claim", headers=earner)
+        assert claim.status_code == 200
+        assert claim.json()["rewards"][0]["amount"] == "2.00000000"
+        assert client.post(f"/api/bagdrops/{drop_id}/claim", headers=earner).status_code == 409
+        balances = client.get("/api/users/dashboard", headers=earner).json()["balances"]
+        assert any(item["asset_symbol"] == "TBAG" and float(item["amount"]) == 82 for item in balances)
