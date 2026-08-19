@@ -1,5 +1,6 @@
 from datetime import datetime, UTC
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from decimal import Decimal
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from .db import Base
 
@@ -20,3 +21,21 @@ class Notification(Base):
     dedupe_key: Mapped[str] = mapped_column(String(160))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     read_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class CampaignTemplate(Base):
+    __tablename__ = "campaign_templates"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    name: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text)
+    category: Mapped[str] = mapped_column(String(40), default="LEARN")
+    difficulty: Mapped[str] = mapped_column(String(24), default="EASY")
+    user_share_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), default=80)
+    nubagz_share_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), default=15)
+    referral_share_pct: Mapped[Decimal] = mapped_column(Numeric(6, 3), default=5)
+    default_max_users: Mapped[int] = mapped_column(Integer, default=1000)
+    mission_blueprint: Mapped[str] = mapped_column(Text)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
