@@ -31,3 +31,35 @@ class BagBuilderAttribution(Base):
     campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class Bounty(Base):
+    __tablename__ = "bounties"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(180))
+    description: Mapped[str] = mapped_column(Text)
+    reward_asset: Mapped[str] = mapped_column(String(24))
+    reward_per_winner: Mapped[Decimal] = mapped_column(Numeric(36, 8))
+    max_winners: Mapped[int] = mapped_column(Integer)
+    winners_count: Mapped[int] = mapped_column(Integer, default=0)
+    funded_amount: Mapped[Decimal] = mapped_column(Numeric(36, 8))
+    distributed_amount: Mapped[Decimal] = mapped_column(Numeric(36, 8), default=0)
+    funding_reference: Mapped[str] = mapped_column(String(255))
+    funding_status: Mapped[str] = mapped_column(String(24), default="DECLARED", index=True)
+    status: Mapped[str] = mapped_column(String(24), default="PENDING", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class BountySubmission(Base):
+    __tablename__ = "bounty_submissions"
+    __table_args__ = (UniqueConstraint("bounty_id", "user_id", name="uq_bounty_user_submission"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    bounty_id: Mapped[int] = mapped_column(ForeignKey("bounties.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    evidence: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(24), default="PENDING", index=True)
+    reviewed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
