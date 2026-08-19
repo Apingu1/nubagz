@@ -66,3 +66,29 @@ class BagDropClaim(Base):
     drop_id: Mapped[int] = mapped_column(ForeignKey("bag_drops.id"), index=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     claimed_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class OnchainRule(Base):
+    __tablename__ = "onchain_rules"
+    __table_args__ = (UniqueConstraint("mission_id", name="uq_onchain_rule_mission"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    mission_id: Mapped[int] = mapped_column(ForeignKey("missions.id"), index=True)
+    chain: Mapped[str] = mapped_column(String(32), default="Avalanche")
+    rule_type: Mapped[str] = mapped_column(String(40), default="TX_SUCCESS")
+    contract_address: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    min_amount: Mapped[Decimal | None] = mapped_column(Numeric(36, 12), nullable=True)
+    token_decimals: Mapped[int] = mapped_column(Integer, default=18)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class OnchainProof(Base):
+    __tablename__ = "onchain_proofs"
+    __table_args__ = (UniqueConstraint("rule_id", "user_id", name="uq_onchain_proof_user_rule"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    rule_id: Mapped[int] = mapped_column(ForeignKey("onchain_rules.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    wallet_address: Mapped[str] = mapped_column(String(255))
+    tx_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    proof_summary: Mapped[str] = mapped_column(String(2000), default="verified")
+    verified_at: Mapped[datetime] = mapped_column(DateTime, default=now)
