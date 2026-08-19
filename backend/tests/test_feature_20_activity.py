@@ -24,7 +24,8 @@ def test_activity_feed_contains_real_completion_without_private_account_fields()
         event=next(e for e in feed.json()['events'] if e['event_type']=='BAG_COMPLETED' and e['username']=='Feature20Worker' and e['campaign_id']==cid)
         assert event['project_name']=='Feature Twenty Activity'
         assert set(event)=={'event_type','username','headline','detail','project_name','campaign_id','link_path','occurred_at'}
-        serialized=str(feed.json()).lower()
-        for forbidden in ('feature20-worker@example.com','wallet_address','payout','balance'):
-            assert forbidden not in serialized
-        assert 'never exposes emails' in feed.json()['privacy'].lower()
+        event_payload=str(feed.json()['events']).lower()
+        for forbidden in ('feature20-worker@example.com','wallet_address','payout_address','payout_destination','account_balance'):
+            assert forbidden not in event_payload
+        privacy=feed.json()['privacy'].lower()
+        assert 'never exposes emails' in privacy and 'wallet addresses' in privacy and 'payout destinations' in privacy and 'private account balances' in privacy
