@@ -39,3 +39,16 @@ class CampaignTemplate(Base):
     is_system: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class ProjectReview(Base):
+    __tablename__ = "project_reviews"
+    __table_args__ = (UniqueConstraint("project_id", "user_id", name="uq_project_review_user"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    rating: Mapped[int] = mapped_column(Integer)
+    review: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(24), default="PUBLISHED", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
