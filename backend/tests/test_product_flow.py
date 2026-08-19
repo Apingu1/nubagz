@@ -67,3 +67,8 @@ def test_complete_creator_to_earner_flow():
         assert any(item["asset_symbol"] == "TBAG" and float(item["amount"]) == 80 for item in balances)
         treasury = client.get("/api/admin/treasury", headers=admin).json()
         assert any(item["asset"] == "TBAG" and float(item["amount"]) == 20 for item in treasury)
+
+        earnings = client.get("/api/earnings/summary", headers=earner)
+        assert earnings.status_code == 200
+        assert any(item["asset"] == "TBAG" and float(item["amount"]) == 80 for item in earnings.json()["lifetime"])
+        assert earnings.json()["unique_assets"] >= 1
