@@ -3,9 +3,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .db import Base, engine, SessionLocal
-from . import economy_models  # noqa: F401 - registers economy tables with SQLAlchemy metadata
+from . import economy_models, risk_models  # noqa: F401 - registers extension tables with SQLAlchemy metadata
 from .seed import seed_demo
-from .routers import auth, projects, campaigns, users, admin, funding, earnings, prices, bagdrops, daily, onchain, trust, access
+from .routers import auth, projects, campaigns, users, admin, funding, earnings, prices, bagdrops, daily, onchain, trust, access, risk
 
 
 @asynccontextmanager
@@ -19,7 +19,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="1.8.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.9.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.include_router(auth.router)
 app.include_router(projects.router)
@@ -34,8 +34,9 @@ app.include_router(daily.router)
 app.include_router(onchain.router)
 app.include_router(trust.router)
 app.include_router(access.router)
+app.include_router(risk.router)
 
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "nubagz-api", "version": "1.8.0"}
+    return {"status": "ok", "service": "nubagz-api", "version": "1.9.0"}
