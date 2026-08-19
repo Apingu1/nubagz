@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..db import get_db
 from ..deps import get_current_user
 from ..models import User, Project, Campaign, Mission, Enrollment, MissionCompletion, LedgerEntry
+from ..economy_models import OnchainRule, OnchainProof
 from ..schemas import CampaignCreate, CampaignOut, MissionCompleteIn
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
@@ -21,11 +22,7 @@ def serialize_campaign(c: Campaign, db: Session) -> CampaignOut:
 
 
 @router.get("", response_model=list[CampaignOut])
-def list_campaigns(
-    category: str | None = Query(default=None),
-    featured: bool | None = Query(default=None),
-    db: Session = Depends(get_db),
-):
+def list_campaigns(category: str | None = Query(default=None), featured: bool | None = Query(default=None), db: Session = Depends(get_db)):
     q = db.query(Campaign).options(joinedload(Campaign.project), joinedload(Campaign.missions)).filter(Campaign.status == "LIVE")
     if category:
         q = q.filter(Campaign.category == category.upper())
@@ -37,14 +34,7 @@ def list_campaigns(
 
 @router.get("/mine", response_model=list[CampaignOut])
 def my_campaigns(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    campaigns = (
-        db.query(Campaign)
-        .join(Project)
-        .options(joinedload(Campaign.project), joinedload(Campaign.missions))
-        .filter(Project.owner_id == user.id)
-        .order_by(Campaign.created_at.desc())
-        .all()
-    )
+    campaigns = db.query(Campaign).join(Project).options(joinedload(Campaign.project), joinedload(Campaign.missions)).filter(Project.owner_id == user.id).order_by(Campaign.created_at.desc()).all()
     return [serialize_campaign(c, db) for c in campaigns]
 
 
@@ -105,6 +95,13 @@ def complete_mission(campaign_id: int, mission_id: int, data: MissionCompleteIn,
         raise HTTPException(400, "Join this Bag first")
     if db.query(MissionCompletion).filter(MissionCompletion.user_id == user.id, MissionCompletion.mission_id == mission_id).first():
         raise HTTPException(409, "Mission already completed")
+
+    onchain_rule = db.query(OnchainRule).filter(OnchainRule.mission_id == mission_id).first()
+    if onchain_rule:
+        proof = db.query(OnchainProof).filter(OnchainProof.rule_id == onchain_rule.id, OnchainProof.user_id == user.id).first()
+        if not proof:
+            raise HTTPException(400, "Complete this mission's on-chain verification before claiming completion")
+
     verified = True
     if mission.verification_type == "QUIZ":
         verified = bool(data.answer and mission.quiz_answer and data.answer.strip().lower() == mission.quiz_answer.strip().lower())
@@ -141,9 +138,4 @@ def complete_mission(campaign_id: int, mission_id: int, data: MissionCompleteIn,
 def progress(campaign_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     enrollment = db.query(Enrollment).filter(Enrollment.user_id == user.id, Enrollment.campaign_id == campaign_id).first()
     completion_ids = [r[0] for r in db.query(MissionCompletion.mission_id).join(Mission, Mission.id == MissionCompletion.mission_id).filter(MissionCompletion.user_id == user.id, Mission.campaign_id == campaign_id).all()]
-    return {
-        "joined": bool(enrollment),
-        "status": enrollment.status if enrollment else None,
-        "completed_mission_ids": completion_ids,
-        "earned_amount": str(enrollment.earned_amount) if enrollment else "0",
-    }
+    return {"joined": bool(enrollment), "status": enrollment.status if enrollment else None, "completed_mission_ids": completion_ids, "earned_amount": str(enrollment.earned_amount) if enrollment else "0"}
