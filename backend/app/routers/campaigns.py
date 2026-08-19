@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..db import get_db
 from ..deps import get_current_user
 from ..models import User, Project, Campaign, Mission, Enrollment, MissionCompletion, LedgerEntry
-from ..economy_models import OnchainRule, OnchainProof, CampaignAccessRule
+from ..economy_models import OnchainRule, OnchainProof, CampaignAccessRule, CampaignFunding
 from ..risk_models import UserTrustProfile
 from ..schemas import CampaignCreate, CampaignOut, MissionCompleteIn
 
@@ -20,6 +20,14 @@ def serialize_campaign(c: Campaign, db: Session) -> CampaignOut:
     payload.enrolled_count = enrolled
     payload.completed_count = completed
     return payload
+
+
+def funding_available(db: Session, campaign: Campaign, next_gross: Decimal = Decimal("0")) -> bool:
+    funding = db.query(CampaignFunding).filter(CampaignFunding.campaign_id == campaign.id, CampaignFunding.status == "VERIFIED").first()
+    if not funding:
+        return False
+    distributed = db.query(func.coalesce(func.sum(LedgerEntry.amount), 0)).filter(LedgerEntry.campaign_id == campaign.id).scalar() or Decimal("0")
+    return Decimal(funding.verified_amount) - Decimal(distributed) >= next_gross
 
 
 @router.get("", response_model=list[CampaignOut])
@@ -61,6 +69,8 @@ def enroll(campaign_id: int, db: Session = Depends(get_db), user: User = Depends
     if not campaign or campaign.status != "LIVE": raise HTTPException(404, "Bag is not live")
     existing = db.query(Enrollment).filter(Enrollment.user_id == user.id, Enrollment.campaign_id == campaign_id).first()
     if existing: return {"ok": True, "enrollment_id": existing.id, "status": existing.status}
+    if not funding_available(db, campaign, Decimal(campaign.gross_reward_per_user)):
+        raise HTTPException(409, "This Bag is temporarily unavailable because verified reward inventory is exhausted")
     trust = db.query(UserTrustProfile).filter(UserTrustProfile.user_id == user.id).first()
     if trust and trust.trust_level == "RESTRICTED": raise HTTPException(403, "This account is restricted from new reward opportunities pending trust review")
     access_rule = db.query(CampaignAccessRule).filter(CampaignAccessRule.campaign_id == campaign_id).first()
@@ -86,10 +96,14 @@ def complete_mission(campaign_id: int, mission_id: int, data: MissionCompleteIn,
     if mission.verification_type == "QUIZ":
         verified = bool(data.answer and mission.quiz_answer and data.answer.strip().lower() == mission.quiz_answer.strip().lower())
         if not verified: raise HTTPException(400, "That answer is not correct")
+    will_complete = enrollment.completed_count + 1 >= len(campaign.missions)
+    gross = Decimal(campaign.gross_reward_per_user)
+    if will_complete and not funding_available(db, campaign, gross):
+        raise HTTPException(409, "Reward inventory was exhausted before this Bag could settle. No final completion was recorded.")
     db.add(MissionCompletion(user_id=user.id, mission_id=mission_id, answer=data.answer, verified=verified)); enrollment.completed_count += 1
     user.xp += mission.xp_reward; user.bag_score = min(1000, user.bag_score + max(1, mission.xp_reward // 10)); completed_now = False
-    if enrollment.completed_count >= len(campaign.missions):
-        completed_now = True; enrollment.status = "COMPLETED"; enrollment.completed_at = datetime.now(UTC); gross = Decimal(campaign.gross_reward_per_user)
+    if will_complete:
+        completed_now = True; enrollment.status = "COMPLETED"; enrollment.completed_at = datetime.now(UTC)
         user_amount = gross * Decimal(campaign.user_share_pct) / Decimal("100"); platform_amount = gross * Decimal(campaign.nubagz_share_pct) / Decimal("100"); referral_amount = gross * Decimal(campaign.referral_share_pct) / Decimal("100")
         enrollment.earned_amount = user_amount
         db.add(LedgerEntry(user_id=user.id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=user_amount, entry_type="CAMPAIGN_REWARD", note=f"Completed {campaign.title}"))
