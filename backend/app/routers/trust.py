@@ -8,6 +8,7 @@ from ..models import Project, Campaign, Enrollment
 from ..economy_models import CampaignFunding
 
 router = APIRouter(prefix="/api/trust", tags=["trust"])
+SCORE_VERSION = "1.0"
 
 
 def project_trust(project: Project, db: Session):
@@ -15,14 +16,20 @@ def project_trust(project: Project, db: Session):
     campaign_ids = [c.id for c in campaigns]
     approved_points = 25 if project.status == "APPROVED" else 0
 
-    verified_funding = 0
-    if campaign_ids:
-        verified_funding = db.query(func.count(CampaignFunding.id)).filter(CampaignFunding.campaign_id.in_(campaign_ids), CampaignFunding.status == "VERIFIED").scalar() or 0
-    funding_ratio = Decimal(verified_funding) / Decimal(len(campaigns)) if campaigns else Decimal("0")
-    funding_points = int(funding_ratio * Decimal("25"))
+    fully_funded = 0
+    for campaign in campaigns:
+        funding = db.query(CampaignFunding).filter(CampaignFunding.campaign_id == campaign.id, CampaignFunding.status == "VERIFIED").first()
+        required = Decimal(campaign.gross_reward_per_user) * Decimal(campaign.max_users)
+        if funding and Decimal(funding.verified_amount) >= required:
+            fully_funded += 1
+    funding_ratio = Decimal(fully_funded) / Decimal(len(campaigns)) if campaigns else Decimal("0")
+    funding_points = min(25, int(funding_ratio * Decimal("25")))
 
-    enrollments = db.query(func.count(Enrollment.id)).filter(Enrollment.campaign_id.in_(campaign_ids)).scalar() or 0 if campaign_ids else 0
-    completions = db.query(func.count(Enrollment.id)).filter(Enrollment.campaign_id.in_(campaign_ids), Enrollment.status == "COMPLETED").scalar() or 0 if campaign_ids else 0
+    if campaign_ids:
+        enrollments = db.query(func.count(Enrollment.id)).filter(Enrollment.campaign_id.in_(campaign_ids)).scalar() or 0
+        completions = db.query(func.count(Enrollment.id)).filter(Enrollment.campaign_id.in_(campaign_ids), Enrollment.status == "COMPLETED").scalar() or 0
+    else:
+        enrollments = completions = 0
     completion_rate = Decimal(completions) / Decimal(enrollments) if enrollments else Decimal("0")
     completion_points = min(20, int(completion_rate * Decimal("20")))
 
@@ -36,7 +43,14 @@ def project_trust(project: Project, db: Session):
     age_days = max(0, (datetime.now(UTC) - created).days)
     age_points = min(15, age_days // 7)
 
-    score = min(100, approved_points + funding_points + completion_points + transparency_points + age_points)
+    factors = {
+        "approval": approved_points,
+        "verified_funding": funding_points,
+        "completion_quality": completion_points,
+        "transparency": transparency_points,
+        "age": age_points,
+    }
+    score = min(100, sum(factors.values()))
     level = "LOW SIGNAL"
     if score >= 80: level = "STRONG"
     elif score >= 60: level = "ESTABLISHED"
@@ -48,21 +62,17 @@ def project_trust(project: Project, db: Session):
         "symbol": project.symbol,
         "score": score,
         "level": level,
-        "factors": {
-            "approval": approved_points,
-            "verified_funding": funding_points,
-            "completion_quality": completion_points,
-            "transparency": transparency_points,
-            "age": age_points,
-        },
+        "factors": factors,
         "metrics": {
             "campaigns": len(campaigns),
-            "verified_funded_campaigns": int(verified_funding),
+            "verified_funded_campaigns": fully_funded,
             "participants": int(enrollments),
             "completions": int(completions),
             "completion_rate_pct": str(completion_rate * Decimal("100")),
             "age_days": age_days,
         },
+        "score_version": SCORE_VERSION,
+        "calculated_at": datetime.now(UTC).isoformat(),
         "disclaimer": "NuBagz Trust Score is an internal participation and transparency risk signal. It is not an endorsement, audit, guarantee, or investment recommendation.",
     }
 
