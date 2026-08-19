@@ -77,3 +77,12 @@ class DisputeMessage(Base):
     author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     message: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class WatchBag(Base):
+    __tablename__ = "watch_bag"
+    __table_args__ = (UniqueConstraint("user_id", "campaign_id", name="uq_watch_bag_user_campaign"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
