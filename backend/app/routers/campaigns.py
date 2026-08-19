@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..db import get_db
 from ..deps import get_current_user
 from ..models import User, Project, Campaign, Mission, Enrollment, MissionCompletion, LedgerEntry
-from ..economy_models import OnchainRule, OnchainProof
+from ..economy_models import OnchainRule, OnchainProof, CampaignAccessRule
 from ..schemas import CampaignCreate, CampaignOut, MissionCompleteIn
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
@@ -72,6 +72,9 @@ def enroll(campaign_id: int, db: Session = Depends(get_db), user: User = Depends
     existing = db.query(Enrollment).filter(Enrollment.user_id == user.id, Enrollment.campaign_id == campaign_id).first()
     if existing:
         return {"ok": True, "enrollment_id": existing.id, "status": existing.status}
+    access_rule = db.query(CampaignAccessRule).filter(CampaignAccessRule.campaign_id == campaign_id).first()
+    if access_rule and user.bag_score < access_rule.min_bag_score:
+        raise HTTPException(403, f"BagScore {access_rule.min_bag_score}+ required for this opportunity")
     enrolled_count = db.query(func.count(Enrollment.id)).filter(Enrollment.campaign_id == campaign_id).scalar() or 0
     if enrolled_count >= campaign.max_users:
         raise HTTPException(409, "This Bag is full")
@@ -95,13 +98,11 @@ def complete_mission(campaign_id: int, mission_id: int, data: MissionCompleteIn,
         raise HTTPException(400, "Join this Bag first")
     if db.query(MissionCompletion).filter(MissionCompletion.user_id == user.id, MissionCompletion.mission_id == mission_id).first():
         raise HTTPException(409, "Mission already completed")
-
     onchain_rule = db.query(OnchainRule).filter(OnchainRule.mission_id == mission_id).first()
     if onchain_rule:
         proof = db.query(OnchainProof).filter(OnchainProof.rule_id == onchain_rule.id, OnchainProof.user_id == user.id).first()
         if not proof:
             raise HTTPException(400, "Complete this mission's on-chain verification before claiming completion")
-
     verified = True
     if mission.verification_type == "QUIZ":
         verified = bool(data.answer and mission.quiz_answer and data.answer.strip().lower() == mission.quiz_answer.strip().lower())
@@ -112,7 +113,6 @@ def complete_mission(campaign_id: int, mission_id: int, data: MissionCompleteIn,
     enrollment.completed_count += 1
     user.xp += mission.xp_reward
     user.bag_score = min(1000, user.bag_score + max(1, mission.xp_reward // 10))
-
     completed_now = False
     if enrollment.completed_count >= len(campaign.missions):
         completed_now = True
