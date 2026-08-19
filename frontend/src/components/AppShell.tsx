@@ -1,11 +1,11 @@
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
-import { Compass, LayoutDashboard, Trophy, BriefcaseBusiness, Shield, LogOut, WalletCards, Zap, BadgePoundSterling, Gift, CalendarDays, RadioTower } from 'lucide-react'
+import { Compass, LayoutDashboard, Trophy, BriefcaseBusiness, Shield, LogOut, WalletCards, Zap, BadgePoundSterling, Gift, CalendarDays, RadioTower, ShieldCheck } from 'lucide-react'
 import { Logo } from './Logo'
 import { useAuth } from '../context/AuthContext'
 
 export default function AppShell(){
  const {user,logout}=useAuth(); const nav=useNavigate()
- const items=[['/app','Home',LayoutDashboard],['/app/daily','Daily Earn',CalendarDays],['/app/discover','Discover',Compass],['/app/drops','BagDrops',Gift],['/app/onchain','Onchain Lab',RadioTower],['/app/earnings','Earnings',BadgePoundSterling],['/app/bag','My Bag',WalletCards],['/app/leaderboard','Leaderboard',Trophy],['/app/studio','Creator Studio',BriefcaseBusiness]] as const
+ const items=[['/app','Home',LayoutDashboard],['/app/daily','Daily Earn',CalendarDays],['/app/discover','Discover',Compass],['/app/drops','BagDrops',Gift],['/app/onchain','Onchain Lab',RadioTower],['/app/trust','Trust',ShieldCheck],['/app/earnings','Earnings',BadgePoundSterling],['/app/bag','My Bag',WalletCards],['/app/leaderboard','Leaderboard',Trophy],['/app/studio','Creator Studio',BriefcaseBusiness]] as const
  return <div className="app-shell">
   <aside className="sidebar">
     <Logo/><div className="side-kicker">EARN YOUR WAY IN</div>
