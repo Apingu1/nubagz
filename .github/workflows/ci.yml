@@ -2,7 +2,7 @@ name: NuBagz CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/full-25-economy]
   pull_request:
   workflow_dispatch:
 
