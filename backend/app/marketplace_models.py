@@ -63,3 +63,32 @@ class BountySubmission(Base):
     reviewed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     reviewed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class RevenueShareDistribution(Base):
+    __tablename__ = "revenue_share_distributions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), index=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), index=True)
+    created_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(180))
+    asset_symbol: Mapped[str] = mapped_column(String(24))
+    funded_amount: Mapped[Decimal] = mapped_column(Numeric(36, 8))
+    distributed_amount: Mapped[Decimal] = mapped_column(Numeric(36, 8), default=0)
+    funding_reference: Mapped[str] = mapped_column(String(255))
+    funding_status: Mapped[str] = mapped_column(String(24), default="DECLARED", index=True)
+    status: Mapped[str] = mapped_column(String(24), default="PENDING", index=True)
+    recipient_count: Mapped[int] = mapped_column(Integer, default=0)
+    amount_per_recipient: Mapped[Decimal | None] = mapped_column(Numeric(36, 8), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    executed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class RevenueShareRecipient(Base):
+    __tablename__ = "revenue_share_recipients"
+    __table_args__ = (UniqueConstraint("distribution_id", "user_id", name="uq_revenue_share_user"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    distribution_id: Mapped[int] = mapped_column(ForeignKey("revenue_share_distributions.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    amount: Mapped[Decimal] = mapped_column(Numeric(36, 8))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
