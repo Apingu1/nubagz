@@ -23,3 +23,13 @@ class CampaignFunding(Base):
     verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+
+class AssetPriceSnapshot(Base):
+    __tablename__ = "asset_price_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    asset_symbol: Mapped[str] = mapped_column(String(24), index=True)
+    price_gbp: Mapped[Decimal] = mapped_column(Numeric(36, 12))
+    source: Mapped[str] = mapped_column(String(64), default="MANUAL")
+    captured_at: Mapped[datetime] = mapped_column(DateTime, default=now, index=True)
