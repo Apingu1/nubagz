@@ -92,3 +92,13 @@ class OnchainProof(Base):
     tx_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     proof_summary: Mapped[str] = mapped_column(String(2000), default="verified")
     verified_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class CampaignAccessRule(Base):
+    __tablename__ = "campaign_access_rules"
+    __table_args__ = (UniqueConstraint("campaign_id", name="uq_campaign_access_rule"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), index=True)
+    min_bag_score: Mapped[int] = mapped_column(Integer, default=0)
+    updated_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
