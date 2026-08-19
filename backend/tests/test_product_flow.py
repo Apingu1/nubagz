@@ -37,6 +37,7 @@ def test_complete_creator_to_earner_flow():
             "category": "LEARN", "difficulty": "EASY", "reward_asset": "TBAG", "funding_type": "TOKEN",
             "token_allocation": 100000, "gross_reward_per_user": 100, "user_share_pct": 80,
             "nubagz_share_pct": 15, "referral_share_pct": 5, "max_users": 1000,
+            "estimated_value_gbp": 10,
             "missions": [
                 {"title": "Learn", "description": "Read briefing", "mission_type": "LEARN", "verification_type": "SELF_ATTEST", "xp_reward": 50},
                 {"title": "Verify", "description": "Answer token symbol", "mission_type": "LEARN", "verification_type": "QUIZ", "quiz_question": "Token symbol?", "quiz_options": ["TBAG", "BTC"], "quiz_answer": "TBAG", "xp_reward": 75}
@@ -68,7 +69,12 @@ def test_complete_creator_to_earner_flow():
         treasury = client.get("/api/admin/treasury", headers=admin).json()
         assert any(item["asset"] == "TBAG" and float(item["amount"]) == 20 for item in treasury)
 
+        price = client.post("/api/prices/snapshot", headers=admin, json={"asset": "TBAG", "price_gbp": 0.1, "source": "TEST"})
+        assert price.status_code == 200
         earnings = client.get("/api/earnings/summary", headers=earner)
         assert earnings.status_code == 200
         assert any(item["asset"] == "TBAG" and float(item["amount"]) == 80 for item in earnings.json()["lifetime"])
+        valuation = next(item for item in earnings.json()["valuations"] if item["asset"] == "TBAG")
+        assert float(valuation["current_value_gbp"]) == 8.0
+        assert float(valuation["original_estimated_value_gbp"]) == 8.0
         assert earnings.json()["unique_assets"] >= 1
