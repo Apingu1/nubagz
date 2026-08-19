@@ -44,6 +44,18 @@ def test_complete_creator_to_earner_flow():
         })
         assert campaign.status_code == 200
         campaign_id = campaign.json()["id"]
+
+        unfunded_live = client.patch(f"/api/admin/campaigns/{campaign_id}", headers=admin, json={"status": "LIVE"})
+        assert unfunded_live.status_code == 400
+        assert "funding is verified" in unfunded_live.json()["detail"]
+
+        declared = client.post(f"/api/funding/campaigns/{campaign_id}/declare", headers=creator, json={"amount": 100000, "tx_hash": "0xtestfunding"})
+        assert declared.status_code == 200
+        assert declared.json()["status"] == "DECLARED"
+        verified = client.post(f"/api/funding/campaigns/{campaign_id}/verify", headers=admin, json={"amount": 100000, "tx_hash": "0xtestfunding"})
+        assert verified.status_code == 200
+        assert verified.json()["fully_funded"] is True
+
         assert client.patch(f"/api/admin/campaigns/{campaign_id}", headers=admin, json={"status": "LIVE"}).status_code == 200
         assert client.post(f"/api/campaigns/{campaign_id}/enroll", headers=earner).status_code == 200
 
