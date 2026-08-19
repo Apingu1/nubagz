@@ -66,6 +66,12 @@ def my_bagdrops(db: Session = Depends(get_db), user: User = Depends(get_current_
     return [serialize(row, db, user.id) for row in rows]
 
 
+@router.get("/admin")
+def admin_bagdrops(db: Session = Depends(get_db), user: User = Depends(require_admin)):
+    rows = db.query(BagDrop).order_by(BagDrop.created_at.desc()).all()
+    return [serialize(row, db, user.id) for row in rows]
+
+
 @router.post("")
 def create_bagdrop(data: BagDropCreateIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     project = db.get(Project, data.project_id)
@@ -102,6 +108,7 @@ def activate_bagdrop(drop_id: int, db: Session = Depends(get_db), _: User = Depe
         required = Decimal(item.amount_per_claim) * Decimal(drop.max_claims)
         if Decimal(item.funded_amount) < required:
             raise HTTPException(400, f"BagDrop is underfunded for {item.asset_symbol}")
+    # Activation is an explicit admin verification step. The stored reference is never auto-trusted merely because it exists.
     drop.funding_status = "VERIFIED"
     drop.status = "LIVE"
     db.commit()
