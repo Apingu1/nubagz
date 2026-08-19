@@ -15,9 +15,7 @@ SWAP_PROVIDER_BASE_URL=https://your-routing-adapter.example
 SWAP_PROVIDER_API_KEY=optional-secret
 ```
 
-When configured, NuBagz sends:
-
-`POST {SWAP_PROVIDER_BASE_URL}/quote`
+When configured, NuBagz sends `POST {SWAP_PROVIDER_BASE_URL}/quote`:
 
 ```json
 {
@@ -51,16 +49,42 @@ NuBagz stores the quote and unsigned transaction. The user's verified wallet is 
 
 ## Sponsored gas provider
 
-The gas sponsorship integration uses these environment variables:
+Configure:
 
 ```env
 GAS_SPONSOR_PROVIDER_BASE_URL=https://your-gas-adapter.example
 GAS_SPONSOR_PROVIDER_API_KEY=optional-secret
 ```
 
-The provider must only be called after NuBagz has verified a sponsor-funded gas budget and an eligible request. The gas integration must never fall back to founder-funded execution when sponsor inventory is unavailable.
+NuBagz first requires a project-owned gas budget whose maximum obligation is fully funded and manually verified. A participant must join a live campaign from the sponsoring project, have a verified EVM wallet, and pass trust controls before a gas request can be drafted.
 
-The concrete request/response contract is documented alongside the Sponsored Gas router once that integration is enabled.
+When execution is requested, NuBagz sends `POST {GAS_SPONSOR_PROVIDER_BASE_URL}/sponsor`:
+
+```json
+{
+  "wallet_address": "0x...",
+  "chain": "Avalanche",
+  "max_native_amount": "0.01",
+  "transaction": {
+    "to": "0x...",
+    "data": "0x...",
+    "value": "0x0"
+  }
+}
+```
+
+The adapter must execute or sponsor the real transaction and return:
+
+```json
+{
+  "provider": "your-gas-provider",
+  "request_id": "gas-123",
+  "tx_hash": "0x...",
+  "gas_spent_native": "0.0034"
+}
+```
+
+NuBagz only debits the sponsor budget after a valid response containing an actual transaction hash and a positive gas amount that does not exceed the verified per-transaction cap. If no provider is configured, execution returns HTTP 503, the request remains a draft, and sponsor inventory is unchanged. There is no founder-funded fallback.
 
 ## RPC verification
 
