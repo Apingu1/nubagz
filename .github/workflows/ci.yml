@@ -2,9 +2,13 @@ name: NuBagz CI
 
 on:
   push:
-    branches: [main, feature/full-25-economy]
+    branches: [main]
   pull_request:
   workflow_dispatch:
+
+concurrency:
+  group: nubagz-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backend:
