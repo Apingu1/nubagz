@@ -11,6 +11,7 @@ from ..models import User, Project, Campaign, Mission, WalletConnection
 from ..economy_models import OnchainRule, OnchainProof
 
 router = APIRouter(prefix="/api/onchain", tags=["onchain"])
+SUPPORTED_CHAINS = {"avalanche", "ethereum", "base", "arbitrum", "polygon"}
 
 
 class RuleIn(BaseModel):
@@ -93,15 +94,21 @@ def create_rule(data: RuleIn, db: Session = Depends(get_db), user: User = Depend
     allowed = {"TX_SUCCESS", "CONTRACT_INTERACTION", "NATIVE_BALANCE", "ERC20_BALANCE"}
     if rule_type not in allowed:
         raise HTTPException(400, "Unsupported on-chain rule type")
+    if data.chain.strip().lower() not in SUPPORTED_CHAINS:
+        raise HTTPException(400, "Unsupported EVM chain")
     if rule_type in {"CONTRACT_INTERACTION", "ERC20_BALANCE"} and not data.contract_address:
         raise HTTPException(400, "This rule type requires a contract address")
+    if data.contract_address and not (data.contract_address.startswith("0x") and len(data.contract_address) == 42):
+        raise HTTPException(400, "Contract address must be a 20-byte EVM address")
     if rule_type in {"NATIVE_BALANCE", "ERC20_BALANCE"} and data.min_amount is None:
         raise HTTPException(400, "Balance rules require a minimum amount")
     rule = db.query(OnchainRule).filter(OnchainRule.mission_id == mission.id).first()
+    if rule and db.query(OnchainProof).filter(OnchainProof.rule_id == rule.id).first():
+        raise HTTPException(409, "This on-chain rule is frozen because a user has already verified it")
     if not rule:
         rule = OnchainRule(mission_id=mission.id, created_by_id=user.id)
         db.add(rule)
-    rule.chain = data.chain
+    rule.chain = data.chain.strip().title() if data.chain.strip().lower() != "arbitrum" else "Arbitrum"
     rule.rule_type = rule_type
     rule.contract_address = data.contract_address
     rule.min_amount = data.min_amount
@@ -128,6 +135,10 @@ def verify_rule(rule_id: int, data: VerifyIn, db: Session = Depends(get_db), use
     rule = db.get(OnchainRule, rule_id)
     if not rule:
         raise HTTPException(404, "On-chain rule not found")
+    mission = db.get(Mission, rule.mission_id)
+    campaign = db.get(Campaign, mission.campaign_id) if mission else None
+    if not campaign or campaign.status != "LIVE":
+        raise HTTPException(409, "This on-chain requirement is not attached to a live Bag")
     existing = db.query(OnchainProof).filter(OnchainProof.rule_id == rule.id, OnchainProof.user_id == user.id).first()
     if existing:
         return {"verified": True, "rule_id": rule.id, "proof_id": existing.id, "message": "Already verified"}
@@ -140,6 +151,9 @@ def verify_rule(rule_id: int, data: VerifyIn, db: Session = Depends(get_db), use
     if rule.rule_type in {"TX_SUCCESS", "CONTRACT_INTERACTION"}:
         if not data.tx_hash:
             raise HTTPException(400, "Transaction hash is required")
+        reused = db.query(OnchainProof).filter(OnchainProof.rule_id == rule.id, OnchainProof.tx_hash == data.tx_hash).first()
+        if reused:
+            raise HTTPException(409, "This transaction has already been used to verify this NuBagz requirement")
         receipt = rpc_call(rule.chain, "eth_getTransactionReceipt", [data.tx_hash])
         tx = rpc_call(rule.chain, "eth_getTransactionByHash", [data.tx_hash])
         if not receipt or not tx:
