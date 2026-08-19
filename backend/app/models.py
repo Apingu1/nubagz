@@ -29,6 +29,54 @@ class User(Base):
 
     projects = relationship("Project", back_populates="owner")
     ledger_entries = relationship("LedgerEntry", back_populates="user")
+    wallet_connections = relationship("WalletConnection", back_populates="user", cascade="all, delete-orphan")
+    payout_addresses = relationship("PayoutAddress", back_populates="user", cascade="all, delete-orphan")
+
+
+class WalletConnection(Base):
+    __tablename__ = "wallet_connections"
+    __table_args__ = (UniqueConstraint("user_id", "address", name="uq_user_wallet_address"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    address: Mapped[str] = mapped_column(String(255), index=True)
+    chain_type: Mapped[str] = mapped_column(String(24), default="ethereum")
+    chain_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    wallet_client_type: Mapped[str] = mapped_column(String(64), default="unknown")
+    connector_type: Mapped[str] = mapped_column(String(64), default="unknown")
+    wallet_type: Mapped[str] = mapped_column(String(24), default="EXTERNAL")
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_connected_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+    user = relationship("User", back_populates="wallet_connections")
+
+
+class WalletChallenge(Base):
+    __tablename__ = "wallet_challenges"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    address: Mapped[str] = mapped_column(String(255), index=True)
+    nonce: Mapped[str] = mapped_column(String(96), unique=True, index=True)
+    message: Mapped[str] = mapped_column(Text)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class PayoutAddress(Base):
+    __tablename__ = "payout_addresses"
+    __table_args__ = (UniqueConstraint("user_id", "chain", "address", name="uq_user_payout_address"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    address: Mapped[str] = mapped_column(String(255), index=True)
+    chain: Mapped[str] = mapped_column(String(32), default="Avalanche")
+    label: Mapped[str] = mapped_column(String(80), default="Reward address")
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    verification_status: Mapped[str] = mapped_column(String(24), default="UNVERIFIED")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+    user = relationship("User", back_populates="payout_addresses")
 
 
 class Project(Base):
