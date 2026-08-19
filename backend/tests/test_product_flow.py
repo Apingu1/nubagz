@@ -87,6 +87,12 @@ def test_complete_creator_to_earner_flow():
         assert client.post(f"/api/bagdrops/{drop_id}/activate", headers=admin).status_code == 200
         live_drops = client.get("/api/bagdrops", headers=earner)
         assert any(item["id"] == drop_id for item in live_drops.json())
+
+        daily = client.get("/api/daily/earn", headers=earner)
+        assert daily.status_code == 200
+        assert daily.json()["opportunity_count"] >= 1
+        assert any(item["type"] == "BAGDROP" and item["id"] == drop_id for item in daily.json()["opportunities"])
+
         claim = client.post(f"/api/bagdrops/{drop_id}/claim", headers=earner)
         assert claim.status_code == 200
         assert claim.json()["rewards"][0]["amount"] == "2.00000000"
