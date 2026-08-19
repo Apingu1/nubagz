@@ -52,3 +52,28 @@ class ProjectReview(Base):
     status: Mapped[str] = mapped_column(String(24), default="PUBLISHED", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+
+class SafetyReport(Base):
+    __tablename__ = "safety_reports"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    reporter_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    target_type: Mapped[str] = mapped_column(String(24), index=True)
+    target_id: Mapped[int] = mapped_column(Integer, index=True)
+    category: Mapped[str] = mapped_column(String(48), index=True)
+    detail: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(24), default="OPEN", index=True)
+    resolution_action: Mapped[str] = mapped_column(String(48), default="NONE")
+    resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reviewed_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class DisputeMessage(Base):
+    __tablename__ = "dispute_messages"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    report_id: Mapped[int] = mapped_column(ForeignKey("safety_reports.id"), index=True)
+    author_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    message: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
