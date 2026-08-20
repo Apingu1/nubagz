@@ -8,31 +8,59 @@ def login(client, email, password):
     return {'Authorization': f"Bearer {res.json()['access_token']}"}
 
 
-def test_bagscore_tiers_and_campaign_gate_are_enforced():
+def test_bagscore_tiers_expose_benefits_and_campaign_gate_new_enrollments():
     with TestClient(app) as client:
         creator = login(client, 'creator@demo.nubagz.com', 'Creator123!')
         earner = login(client, 'demo@demo.nubagz.com', 'Demo123!')
+
+        tiers = client.get('/api/access/tiers')
+        assert tiers.status_code == 200
+        assert [row['name'] for row in tiers.json()['tiers']] == ['STARTER', 'EXPLORER', 'CONTRIBUTOR', 'PREMIUM', 'ELITE']
+        assert 'deposited wealth' in tiers.json()['principle']
+
         profile = client.get('/api/access/me', headers=earner)
         assert profile.status_code == 200
         assert profile.json()['bag_score'] == 485
         assert profile.json()['tier'] == 'CONTRIBUTOR'
+        assert profile.json()['next_tier'] == 'PREMIUM'
         assert profile.json()['next_tier_score'] == 600
         assert profile.json()['points_to_next'] == 115
+        assert 'Creator and bounty opportunities' in profile.json()['benefits']
 
         campaigns = client.get('/api/campaigns/mine', headers=creator).json()
         target = next(c for c in campaigns if c['status'] == 'LIVE')
-        gate = client.post(f"/api/access/campaigns/{target['id']}", headers=creator, json={'min_bag_score': 1000})
+        gate = client.post(f"/api/access/campaigns/{target['id']}", headers=creator, json={'min_bag_score': 600})
         assert gate.status_code == 200
+        assert gate.json()['required_tier'] == 'PREMIUM'
+        assert gate.json()['message'].startswith('BagScore gate applies to new enrollments')
+
         access = client.get(f"/api/access/campaigns/{target['id']}", headers=earner)
         assert access.status_code == 200
         assert access.json()['eligible'] is False
-        assert access.json()['min_bag_score'] == 1000
+        assert access.json()['min_bag_score'] == 600
+        assert access.json()['required_tier'] == 'PREMIUM'
+        assert access.json()['your_tier'] == 'CONTRIBUTOR'
+        assert access.json()['shortfall'] == 115
+        assert '115 more points' in access.json()['reason']
 
-        blocked = client.post(f"/api/campaigns/{target['id']}/enroll", headers=earner)
+        created = client.post('/api/auth/register', json={
+            'email': 'feature08-new@example.com', 'username': 'Feature08New', 'password': 'Access123!'
+        })
+        assert created.status_code == 200
+        fresh = {'Authorization': f"Bearer {created.json()['access_token']}"}
+        fresh_profile = client.get('/api/access/me', headers=fresh).json()
+        assert fresh_profile['tier'] == 'STARTER'
+        assert fresh_profile['bag_score'] == 100
+
+        blocked = client.post(f"/api/campaigns/{target['id']}/enroll", headers=fresh)
         assert blocked.status_code == 403
-        assert 'BagScore 1000+' in blocked.json()['detail']
+        assert 'BagScore 600+' in blocked.json()['detail']
 
         reset = client.post(f"/api/access/campaigns/{target['id']}", headers=creator, json={'min_bag_score': 0})
         assert reset.status_code == 200
-        access = client.get(f"/api/access/campaigns/{target['id']}", headers=earner)
-        assert access.json()['eligible'] is True
+        open_access = client.get(f"/api/access/campaigns/{target['id']}", headers=fresh).json()
+        assert open_access['eligible'] is True
+        assert open_access['shortfall'] == 0
+        assert open_access['reason'] is None
+        enrolled = client.post(f"/api/campaigns/{target['id']}/enroll", headers=fresh)
+        assert enrolled.status_code == 200
