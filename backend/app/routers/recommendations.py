@@ -13,6 +13,8 @@ from .trust import project_trust
 
 router = APIRouter(prefix="/api/recommendations", tags=["recommendations"])
 
+METHOD = "Explainable rules-based ranking using verified funding, hard eligibility/access gates, reward value, participation history, difficulty fit, continuation state and Project Trust signals. Wallet wealth and token balances are not ranking inputs."
+
 
 def difficulty_fit(user: User, difficulty: str) -> tuple[int, str | None]:
     diff = (difficulty or "EASY").upper()
@@ -29,26 +31,45 @@ def difficulty_fit(user: User, difficulty: str) -> tuple[int, str | None]:
 def my_recommendations(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     trust_profile = db.query(UserTrustProfile).filter(UserTrustProfile.user_id == user.id).first()
     if trust_profile and trust_profile.trust_level == "RESTRICTED":
-        return {"bag_score": user.bag_score, "history_categories": [], "recommendations": [], "restricted": True}
+        return {
+            "bag_score": user.bag_score,
+            "history_categories": [],
+            "recommendations": [],
+            "restricted": True,
+            "method": METHOD,
+        }
 
-    completed_rows = db.query(Enrollment, Campaign).join(Campaign, Campaign.id == Enrollment.campaign_id).filter(Enrollment.user_id == user.id, Enrollment.status == "COMPLETED").all()
+    enrollment_rows = db.query(Enrollment, Campaign).join(
+        Campaign, Campaign.id == Enrollment.campaign_id
+    ).filter(Enrollment.user_id == user.id).all()
+    completed_rows = [(enrollment, campaign) for enrollment, campaign in enrollment_rows if enrollment.status == "COMPLETED"]
     completed_ids = {enrollment.campaign_id for enrollment, _ in completed_rows}
+    active_enrollment_ids = {enrollment.campaign_id for enrollment, _ in enrollment_rows if enrollment.status != "COMPLETED"}
     category_counts = Counter(campaign.category for _, campaign in completed_rows)
 
-    rows = db.query(Campaign).filter(Campaign.status == "LIVE").order_by(Campaign.featured.desc(), Campaign.created_at.desc()).all()
+    rows = db.query(Campaign).filter(Campaign.status == "LIVE").order_by(
+        Campaign.featured.desc(), Campaign.created_at.desc()
+    ).all()
     recommendations = []
     for campaign in rows:
         if campaign.id in completed_ids or not campaign_is_eligible(db, user, campaign):
             continue
-        enrolled_count = db.query(func.count(Enrollment.id)).filter(Enrollment.campaign_id == campaign.id).scalar() or 0
-        if enrolled_count >= campaign.max_users:
+        enrolled_count = db.query(func.count(Enrollment.id)).filter(
+            Enrollment.campaign_id == campaign.id
+        ).scalar() or 0
+        already_enrolled = campaign.id in active_enrollment_ids
+        if enrolled_count >= campaign.max_users and not already_enrolled:
             continue
+        available_slots = max(0, campaign.max_users - enrolled_count)
         project = db.get(Project, campaign.project_id)
         if not project or project.status != "APPROVED":
             continue
 
         score = 10
         reasons = ["Verified reward inventory is available"]
+        if already_enrolled:
+            score += 30
+            reasons.append("Continue a Bag you already started")
         if campaign.featured:
             score += 25
             reasons.append("Featured funded opportunity")
@@ -72,10 +93,13 @@ def my_recommendations(db: Session = Depends(get_db), user: User = Depends(get_c
         if fit_reason:
             reasons.append(fit_reason)
 
-        access = db.query(CampaignAccessRule).filter(CampaignAccessRule.campaign_id == campaign.id).first()
-        if access and access.min_bag_score > 0:
+        access = db.query(CampaignAccessRule).filter(
+            CampaignAccessRule.campaign_id == campaign.id
+        ).first()
+        min_bag_score = access.min_bag_score if access else 0
+        if min_bag_score > 0:
             score += 5
-            reasons.append(f"You meet the BagScore {access.min_bag_score}+ gate")
+            reasons.append(f"You meet the BagScore {min_bag_score}+ gate")
         else:
             score += 3
             reasons.append("Open BagScore access")
@@ -86,20 +110,35 @@ def my_recommendations(db: Session = Depends(get_db), user: User = Depends(get_c
         reasons.append(f"Project Trust signal: {trust['level']} ({trust['score']}/100)")
 
         recommendations.append({
-            "campaign_id": campaign.id, "title": campaign.title, "project_name": project.name,
-            "project_symbol": project.symbol, "category": campaign.category, "difficulty": campaign.difficulty,
+            "campaign_id": campaign.id,
+            "title": campaign.title,
+            "project_name": project.name,
+            "project_symbol": project.symbol,
+            "category": campaign.category,
+            "difficulty": campaign.difficulty,
             "reward_asset": campaign.reward_asset,
             "user_reward": str(Decimal(campaign.gross_reward_per_user) * Decimal(campaign.user_share_pct) / Decimal("100")),
             "estimated_value_gbp": str(estimated_user_gbp) if estimated_user_gbp is not None else None,
-            "recommendation_score": score, "project_trust_score": trust["score"],
-            "reasons": reasons[:6],
+            "recommendation_score": score,
+            "project_trust_score": trust["score"],
+            "access_min_bag_score": min_bag_score,
+            "already_enrolled": already_enrolled,
+            "available_slots": available_slots,
+            "reasons": reasons[:7],
         })
 
-    recommendations.sort(key=lambda item: (-item["recommendation_score"], -(Decimal(item["estimated_value_gbp"]) if item["estimated_value_gbp"] else Decimal("0")), item["campaign_id"]))
+    recommendations.sort(key=lambda item: (
+        -item["recommendation_score"],
+        -(Decimal(item["estimated_value_gbp"]) if item["estimated_value_gbp"] else Decimal("0")),
+        item["campaign_id"],
+    ))
     return {
         "bag_score": user.bag_score,
-        "history_categories": [{"category": category, "completed": count} for category, count in category_counts.most_common()],
+        "history_categories": [
+            {"category": category, "completed": count}
+            for category, count in category_counts.most_common()
+        ],
         "recommendations": recommendations[:12],
         "restricted": False,
-        "method": "Explainable rules-based ranking using verified funding, eligibility, reward value, participation history, difficulty fit and Project Trust signals.",
+        "method": METHOD,
     }

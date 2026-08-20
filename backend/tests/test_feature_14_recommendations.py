@@ -16,6 +16,8 @@ def test_recommendations_are_explainable_sorted_and_never_override_access():
         assert baseline.status_code==200
         baseline_payload=baseline.json()
         assert baseline_payload['recommendations']
+        assert 'verified funding' in baseline_payload['method'].lower()
+        assert 'wallet wealth' in baseline_payload['method'].lower()
         target_id=baseline_payload['recommendations'][0]['campaign_id']
 
         assert client.post(f"/api/access/campaigns/{target_id}",headers=creator,json={'min_bag_score':1000}).status_code==200
@@ -31,6 +33,9 @@ def test_recommendations_are_explainable_sorted_and_never_override_access():
         assert all(r['reasons'] for r in payload['recommendations'])
         assert all(any('reward inventory' in reason.lower() for reason in r['reasons']) for r in payload['recommendations'])
         assert all(0 <= r['project_trust_score'] <= 100 for r in payload['recommendations'])
+        assert all(r['access_min_bag_score'] <= payload['bag_score'] for r in payload['recommendations'])
+        assert all(r['available_slots'] >= 0 for r in payload['recommendations'])
+        assert all(isinstance(r['already_enrolled'],bool) for r in payload['recommendations'])
 
         assert client.post(f"/api/access/campaigns/{target_id}",headers=creator,json={'min_bag_score':0}).status_code==200
         restored=client.get('/api/recommendations/me',headers=earner)
