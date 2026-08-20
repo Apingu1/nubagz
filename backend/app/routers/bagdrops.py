@@ -6,7 +6,7 @@ from ..db import get_db
 from ..deps import get_current_user, require_admin
 from ..models import User, Project, LedgerEntry
 from ..economy_models import BagDrop, BagDropItem, BagDropClaim
-from ..risk_models import UserTrustProfile
+from .risk import evaluate_user
 
 router = APIRouter(prefix="/api/bagdrops", tags=["bagdrops"])
 
@@ -108,8 +108,8 @@ def activate_bagdrop(drop_id: int, db: Session = Depends(get_db), _: User = Depe
 
 @router.post("/{drop_id}/claim")
 def claim_bagdrop(drop_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    trust = db.query(UserTrustProfile).filter(UserTrustProfile.user_id == user.id).first()
-    if trust and trust.trust_level == "RESTRICTED":
+    trust = evaluate_user(db, user)
+    if trust.trust_level == "RESTRICTED":
         raise HTTPException(403, "This account is restricted from reward claims pending trust review")
     drop = db.query(BagDrop).filter(BagDrop.id == drop_id).with_for_update().first()
     if not drop or drop.status != "LIVE" or drop.funding_status != "VERIFIED":
