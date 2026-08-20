@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 from app.main import app
 from app.db import SessionLocal
-from app.risk_models import DeviceInstallObservation
+from app.risk_models import DeviceInstallObservation, UserTrustProfile
 
 
 def login(client,email,password):
@@ -44,6 +44,20 @@ def test_anti_sybil_signals_privacy_and_restriction_enforcement():
         assert any(s['type']=='SHARED_DEVICE_INSTALL' for s in data['signals'])
         assert 'cross-site' in data['privacy_note']
 
+        # Earning routes perform their own fresh risk evaluation instead of trusting stale profile state.
+        auto=client.post('/api/auth/register',json={'email':'risk-auto@example.com','username':'RiskAutoUser','password':'RiskPass123!'})
+        assert auto.status_code==200
+        autoh={'Authorization':f"Bearer {auto.json()['access_token']}"}
+        target=next(c for c in client.get('/api/campaigns/mine',headers=creator).json() if c['status']=='LIVE')
+        enrolled=client.post(f"/api/campaigns/{target['id']}/enroll",headers=autoh)
+        assert enrolled.status_code==200
+        db=SessionLocal()
+        try:
+            profile=db.query(UserTrustProfile).filter(UserTrustProfile.user_id==auto.json()['user']['id']).first()
+            assert profile is not None and profile.last_evaluated_at is not None
+        finally:
+            db.close()
+
         restricted=client.post(f"/api/risk/users/{b.json()['user']['id']}/trust",headers=admin,json={'trust_level':'RESTRICTED','note':'Shared payout and local install signal require manual verification.'})
         assert restricted.status_code==200 and restricted.json()['can_earn'] is False
         queue=client.get('/api/risk/users',headers=admin)
@@ -55,7 +69,6 @@ def test_anti_sybil_signals_privacy_and_restriction_enforcement():
         overview=client.get('/api/admin/overview',headers=admin)
         assert overview.status_code==200 and overview.json()['open_flags']>=2
 
-        target=next(c for c in client.get('/api/campaigns/mine',headers=creator).json() if c['status']=='LIVE')
         blocked=client.post(f"/api/campaigns/{target['id']}/enroll",headers=bh)
         assert blocked.status_code==403 and 'restricted' in blocked.json()['detail'].lower()
         daily=client.get('/api/daily/earn',headers=bh)
