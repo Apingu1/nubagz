@@ -18,7 +18,7 @@ def complete_one_step(client, headers, campaign_id):
     assert result.status_code==200 and result.json()['completed'] is True
 
 
-def test_referrals_pay_only_for_funded_conversions_and_restricted_rewards_redirect():
+def test_referrals_pay_only_for_funded_conversions_and_reviewed_rewards_redirect():
     with TestClient(app) as client:
         referrer=login(client,'demo@demo.nubagz.com','Demo123!')
         creator=login(client,'creator@demo.nubagz.com','Creator123!')
@@ -30,6 +30,7 @@ def test_referrals_pay_only_for_funded_conversions_and_restricted_rewards_redire
         assert invalid.status_code==400 and 'Referral code' in invalid.json()['detail']
 
         before=client.get('/api/referrals/me',headers=referrer);assert before.status_code==200
+        assert before.json()['reward_eligible'] is True and before.json()['trust_level']=='NORMAL'
         code=before.json()['referral_code'];count=before.json()['referred_users'];before_reward=earnings_for(before.json(),'REF10')
         validated=client.get(f'/api/referrals/validate/{code}')
         assert validated.status_code==200 and validated.json()['valid'] is True and validated.json()['eligible'] is True
@@ -65,10 +66,12 @@ def test_referrals_pay_only_for_funded_conversions_and_restricted_rewards_redire
         assert paid['completed_campaign_conversions']>=1
         assert any(e['status']=='PAID' and e['referred_username']=='Feature10RefA' and float(e['paid_amount'])==5 for e in paid['events'])
 
-        restricted=client.post(f'/api/risk/users/{referrer_id}/trust',headers=admin,json={'trust_level':'RESTRICTED','note':'Feature 10 redirect test'})
-        assert restricted.status_code==200
+        reviewed=client.post(f'/api/risk/users/{referrer_id}/trust',headers=admin,json={'trust_level':'REVIEW','note':'Feature 10 referral payout review test'})
+        assert reviewed.status_code==200
         validation=client.get(f'/api/referrals/validate/{code}').json()
-        assert validation['valid'] is True and validation['eligible'] is False
+        assert validation['valid'] is True and validation['eligible'] is False and validation['trust_level']=='REVIEW'
+        paused=client.get('/api/referrals/me',headers=referrer).json()
+        assert paused['reward_eligible'] is False and paused['trust_level']=='REVIEW'
         blocked_signup=client.post('/api/auth/register',json={'email':'feature10-blocked@example.com','username':'Feature10Blocked','password':'Referral123!','referral_code':code})
         assert blocked_signup.status_code==400
 
