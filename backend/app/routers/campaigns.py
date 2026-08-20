@@ -105,6 +105,24 @@ def complete_mission(campaign_id: int, mission_id: int, data: MissionCompleteIn,
         if referrer:
             referrer_profile = evaluate_user(db, referrer)
 
+    builder_pathway = None
+    builder_profile = None
+    builder_user = None
+    if will_complete:
+        attribution = db.query(BagBuilderAttribution).filter(
+            BagBuilderAttribution.user_id == user.id,
+            BagBuilderAttribution.campaign_id == campaign.id,
+        ).first()
+        if attribution:
+            pathway = db.get(BagBuilderPathway, attribution.pathway_id)
+            if pathway and pathway.status == "APPROVED" and pathway.campaign_id == campaign.id:
+                candidate = db.get(User, pathway.creator_id)
+                project = db.get(Project, campaign.project_id)
+                if candidate and project and candidate.id != project.owner_id:
+                    builder_pathway = pathway
+                    builder_user = candidate
+                    builder_profile = evaluate_user(db, candidate)
+
     db.add(MissionCompletion(user_id=user.id, mission_id=mission_id, answer=data.answer, verified=verified)); enrollment.completed_count += 1
     user.xp += mission.xp_reward; user.bag_score = min(1000, user.bag_score + max(1, mission.xp_reward // 10)); completed_now = False
     if will_complete:
@@ -112,15 +130,12 @@ def complete_mission(campaign_id: int, mission_id: int, data: MissionCompleteIn,
         user_amount = gross * Decimal(campaign.user_share_pct) / Decimal("100")
         platform_amount = gross * Decimal(campaign.nubagz_share_pct) / Decimal("100")
         referral_amount = gross * Decimal(campaign.referral_share_pct) / Decimal("100")
-        attribution = db.query(BagBuilderAttribution).filter(BagBuilderAttribution.user_id == user.id, BagBuilderAttribution.campaign_id == campaign.id).first()
         builder_amount = Decimal("0"); builder_id = None
-        if attribution:
-            pathway = db.get(BagBuilderPathway, attribution.pathway_id)
-            if pathway and pathway.status == "APPROVED":
-                builder_amount = gross * Decimal(pathway.creator_share_pct) / Decimal("100")
-                builder_amount = min(builder_amount, platform_amount)
-                builder_id = pathway.creator_id
-                platform_amount -= builder_amount
+        if builder_pathway and builder_user and builder_profile and builder_profile.trust_level != "RESTRICTED":
+            builder_amount = gross * Decimal(builder_pathway.creator_share_pct) / Decimal("100")
+            builder_amount = min(builder_amount, platform_amount)
+            builder_id = builder_user.id
+            platform_amount -= builder_amount
         enrollment.earned_amount = user_amount
         db.add(LedgerEntry(user_id=user.id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=user_amount, entry_type="CAMPAIGN_REWARD", note=f"Completed {campaign.title}"))
         if builder_id and builder_amount > 0:
