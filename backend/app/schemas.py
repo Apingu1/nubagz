@@ -75,7 +75,7 @@ class CampaignCreate(BaseModel):
 class CampaignOut(BaseModel):
     id:int; project_id:int; title:str; description:str; category:str; difficulty:str; reward_asset:str; funding_type:str; token_allocation:Decimal; gross_reward_per_user:Decimal
     user_share_pct:Decimal; nubagz_share_pct:Decimal; referral_share_pct:Decimal; max_users:int; status:str; featured:bool; estimated_value_gbp:Decimal|None; created_at:datetime
-    missions:list[MissionOut]=[]; project:ProjectOut|None=None; enrolled_count:int=0; completed_count:int=0; min_bag_score:int=0; required_tier:str="STARTER"
+    missions:list[MissionOut]=[]; project:ProjectOut|None=None; enrolled_count:int=0; completed_count:int=0
     model_config=ConfigDict(from_attributes=True)
 
 class MissionCompleteIn(BaseModel): answer:str|None=None
