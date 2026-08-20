@@ -3,12 +3,14 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from ..db import get_db
 from ..models import User
+from ..risk_models import UserTrustProfile
 from ..schemas import RegisterIn, LoginIn, AuthOut, UserOut, WalletUpdate
 from ..security import hash_password, verify_password, create_access_token
 from ..utils import unique_referral_code
 from ..deps import get_current_user
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
+REFERRAL_ELIGIBLE_LEVELS = {"NORMAL", "VERIFIED"}
 
 
 @router.post("/register", response_model=AuthOut)
@@ -20,6 +22,11 @@ def register(data: RegisterIn, db: Session = Depends(get_db)):
     referred_by = None
     if data.referral_code:
         referred_by = db.query(User).filter(User.referral_code == data.referral_code.upper()).first()
+        if not referred_by or not referred_by.is_active:
+            raise HTTPException(400, "Referral code is not valid or is no longer active")
+        referrer_profile = db.query(UserTrustProfile).filter(UserTrustProfile.user_id == referred_by.id).first()
+        if referrer_profile and referrer_profile.trust_level not in REFERRAL_ELIGIBLE_LEVELS:
+            raise HTTPException(400, "This referral code is temporarily not eligible for attribution while the referrer is under trust review")
     user = User(
         email=data.email.lower(),
         username=data.username,

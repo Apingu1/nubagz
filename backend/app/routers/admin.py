@@ -1,9 +1,12 @@
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ..db import get_db
 from ..deps import require_admin
 from ..models import User, Project, Campaign, Enrollment, LedgerEntry, Withdrawal, FraudFlag
+from ..economy_models import CampaignFunding
+from ..risk_models import FraudSignal
 from ..schemas import AdminDecision
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -11,6 +14,8 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 @router.get("/overview")
 def overview(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    legacy_flags = db.query(func.count(FraudFlag.id)).filter(FraudFlag.status == "OPEN").scalar() or 0
+    risk_signals = db.query(func.count(FraudSignal.id)).filter(FraudSignal.status == "OPEN").scalar() or 0
     return {
         "users": db.query(func.count(User.id)).scalar() or 0,
         "projects": db.query(func.count(Project.id)).scalar() or 0,
@@ -19,7 +24,7 @@ def overview(db: Session = Depends(get_db), _: User = Depends(require_admin)):
         "pending_projects": db.query(func.count(Project.id)).filter(Project.status == "PENDING").scalar() or 0,
         "pending_campaigns": db.query(func.count(Campaign.id)).filter(Campaign.status == "PENDING").scalar() or 0,
         "pending_withdrawals": db.query(func.count(Withdrawal.id)).filter(Withdrawal.status == "PENDING").scalar() or 0,
-        "open_flags": db.query(func.count(FraudFlag.id)).filter(FraudFlag.status == "OPEN").scalar() or 0,
+        "open_flags": int(legacy_flags) + int(risk_signals),
     }
 
 
@@ -44,7 +49,18 @@ def decide_project(project_id: int, data: AdminDecision, db: Session = Depends(g
 @router.get("/campaigns")
 def campaigns(db: Session = Depends(get_db), _: User = Depends(require_admin)):
     rows = db.query(Campaign).order_by(Campaign.created_at.desc()).all()
-    return [{"id": c.id, "title": c.title, "project_id": c.project_id, "asset": c.reward_asset, "allocation": str(c.token_allocation), "status": c.status, "featured": c.featured, "created_at": c.created_at.isoformat()} for c in rows]
+    funding_rows = {f.campaign_id: f for f in db.query(CampaignFunding).all()}
+    return [{
+        "id": c.id,
+        "title": c.title,
+        "project_id": c.project_id,
+        "asset": c.reward_asset,
+        "allocation": str(c.token_allocation),
+        "status": c.status,
+        "featured": c.featured,
+        "funding_status": funding_rows[c.id].status if c.id in funding_rows else "UNFUNDED",
+        "created_at": c.created_at.isoformat(),
+    } for c in rows]
 
 
 @router.patch("/campaigns/{campaign_id}")
@@ -54,6 +70,11 @@ def decide_campaign(campaign_id: int, data: AdminDecision, db: Session = Depends
         raise HTTPException(404, "Campaign not found")
     if data.status not in {"LIVE", "REJECTED", "SUSPENDED", "PENDING", "COMPLETED"}:
         raise HTTPException(400, "Invalid status")
+    if data.status == "LIVE":
+        funding = db.query(CampaignFunding).filter(CampaignFunding.campaign_id == campaign_id).first()
+        required = Decimal(campaign.gross_reward_per_user) * Decimal(campaign.max_users)
+        if not funding or funding.status != "VERIFIED" or Decimal(funding.verified_amount) < required:
+            raise HTTPException(400, f"Campaign cannot go live until {required} {campaign.reward_asset} of reward funding is verified")
     campaign.status = data.status
     db.commit()
     return {"ok": True, "status": campaign.status}

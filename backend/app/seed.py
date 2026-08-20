@@ -1,6 +1,8 @@
+from datetime import datetime, UTC
 from decimal import Decimal
 from sqlalchemy.orm import Session
 from .models import User, Project, Campaign, Mission
+from .economy_models import CampaignFunding
 from .security import hash_password
 from .utils import unique_referral_code
 
@@ -30,6 +32,8 @@ def seed_demo(db: Session):
     for idx, (project, title, description, category, asset, allocation, gross, max_users, value, featured) in enumerate(specs):
         c = Campaign(project_id=project.id, title=title, description=description, category=category, difficulty="EASY" if idx != 1 else "MEDIUM", reward_asset=asset, funding_type="TOKEN", token_allocation=Decimal(allocation), gross_reward_per_user=Decimal(gross), user_share_pct=Decimal("80"), nubagz_share_pct=Decimal("15"), referral_share_pct=Decimal("5"), max_users=max_users, status="LIVE", featured=featured, estimated_value_gbp=value)
         db.add(c); db.flush()
+        required = Decimal(gross) * Decimal(max_users)
+        db.add(CampaignFunding(campaign_id=c.id, declared_amount=required, verified_amount=required, tx_hash=f"demo-seed-{c.id}", status="VERIFIED", verified_by_id=admin.id, verified_at=datetime.now(UTC)))
         missions = [
             Mission(campaign_id=c.id, title=f"Meet {project.name}", description="Read the quick project briefing and understand what makes this Bag different.", mission_type="LEARN", verification_type="SELF_ATTEST", xp_reward=60, position=0),
             Mission(campaign_id=c.id, title="Pass the signal check", description="Answer one simple question to show you understood the mission.", mission_type="QUIZ", verification_type="QUIZ", quiz_question=f"Which token powers the {project.name} Bag?", quiz_options=[asset, "BTC", "USDT", "NONE"], quiz_answer=asset, xp_reward=90, position=1),

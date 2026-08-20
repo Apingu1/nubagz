@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$ROOT_DIR"
+
+info()  { printf '\n\033[1;36m[NuBagz]\033[0m %s\n' "$*"; }
+ok()    { printf '\033[1;32m[OK]\033[0m %s\n' "$*"; }
+warn()  { printf '\033[1;33m[WARN]\033[0m %s\n' "$*"; }
+fail()  { printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
+
+command -v docker >/dev/null 2>&1 || fail "Docker is not installed or not available in this Codespace."
+docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is not available."
+
+[[ -f docker-compose.yml ]] || fail "docker-compose.yml was not found. Run this script from the NuBagz repository."
+
+if [[ ! -f .env ]]; then
+  info "No .env found. Creating one from .env.example..."
+  [[ -f .env.example ]] || fail ".env.example is missing."
+  cp .env.example .env
+
+  if command -v python >/dev/null 2>&1; then
+    NEW_SECRET="$(python - <<'PY'
+import secrets
+print(secrets.token_urlsafe(48))
+PY
+)"
+    python - "$NEW_SECRET" <<'PY'
+from pathlib import Path
+import sys
+secret = sys.argv[1]
+path = Path('.env')
+lines = path.read_text().splitlines()
+out = []
+replaced = False
+for line in lines:
+    if line.startswith('JWT_SECRET='):
+        out.append(f'JWT_SECRET={secret}')
+        replaced = True
+    else:
+        out.append(line)
+if not replaced:
+    out.insert(0, f'JWT_SECRET={secret}')
+path.write_text('\n'.join(out) + '\n')
+PY
+    ok "Created .env with a fresh local JWT secret."
+  else
+    warn "Python was not available, so .env was copied without generating a new JWT secret."
+  fi
+else
+  ok "Using existing .env file."
+fi
+
+info "Building and starting NuBagz..."
+docker compose up -d --build --remove-orphans
+
+info "Waiting for NuBagz to become ready..."
+READY=0
+for _ in $(seq 1 60); do
+  if curl -fsS --max-time 3 http://localhost:8080 >/dev/null 2>&1; then
+    READY=1
+    break
+  fi
+  sleep 2
+done
+
+printf '\n'
+docker compose ps
+
+if [[ "$READY" -ne 1 ]]; then
+  warn "NuBagz did not answer on port 8080 within the startup window."
+  printf '\n--- API LOGS ---\n'
+  docker compose logs --tail=120 api || true
+  printf '\n--- WEB LOGS ---\n'
+  docker compose logs --tail=120 web || true
+  printf '\n--- DATABASE LOGS ---\n'
+  docker compose logs --tail=80 db || true
+  fail "Startup check failed. Review the logs above."
+fi
+
+ok "NuBagz is running."
+printf '\nOpen: http://localhost:8080\n'
+
+if [[ -n "${CODESPACE_NAME:-}" ]]; then
+  DOMAIN="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}"
+  printf 'Codespaces: https://%s-8080.%s\n' "$CODESPACE_NAME" "$DOMAIN"
+  printf 'If needed, open the Codespaces Ports tab and set port 8080 visibility appropriately.\n'
+fi
+
+printf '\nUseful commands:\n'
+printf '  docker compose logs -f          # follow all logs\n'
+printf '  docker compose logs -f api      # backend logs\n'
+printf '  docker compose logs -f web      # frontend logs\n'
+printf '  docker compose down             # stop NuBagz, keep database\n'
+printf '  docker compose up -d --build    # rebuild/start manually\n\n'
