@@ -38,15 +38,28 @@ def target_owner(target_type: str, target_id: int, db: Session):
         if not campaign or not project: raise HTTPException(404, "Campaign not found")
         return project.owner_id, campaign
     if kind == "REVIEW":
-        review = db.get(ProjectReview, target_id); project = db.get(Project, review.project_id) if review else None
-        if not review or not project: raise HTTPException(404, "Review not found")
-        return project.owner_id, review
+        review = db.get(ProjectReview, target_id)
+        if not review: raise HTTPException(404, "Review not found")
+        # The affected party for reported user-generated content is its author,
+        # not the project owner. This preserves a meaningful right to respond.
+        return review.user_id, review
     raise HTTPException(400, "Report target must be PROJECT, CAMPAIGN or REVIEW")
 
 
 def can_access(row: SafetyReport, user: User, db: Session):
     owner_id, _ = target_owner(row.target_type, row.target_id, db)
     return user.role == "ADMIN" or row.reporter_id == user.id or owner_id == user.id
+
+
+def author_label(row: SafetyReport, message: DisputeMessage, viewer: User, db: Session):
+    author = db.get(User, message.author_id)
+    if not author:
+        return "Unknown"
+    # Reporter identity remains private from the affected party unless they
+    # choose to reveal it in their own text. Admins and the reporter see it.
+    if message.author_id == row.reporter_id and viewer.role != "ADMIN" and viewer.id != row.reporter_id:
+        return "Participant"
+    return author.username
 
 
 def serialize(row: SafetyReport, db: Session, viewer: User):
@@ -58,14 +71,16 @@ def serialize(row: SafetyReport, db: Session, viewer: User):
         "resolution_action":row.resolution_action,"resolution_note":row.resolution_note,"created_at":row.created_at.isoformat(),"resolved_at":row.resolved_at.isoformat() if row.resolved_at else None,
         "reporter":reporter.username if (viewer.role=="ADMIN" or viewer.id==row.reporter_id) and reporter else "Participant",
         "is_reporter":viewer.id==row.reporter_id,"is_target_owner":viewer.id==owner_id,
-        "messages":[{"id":m.id,"author":(db.get(User,m.author_id).username if db.get(User,m.author_id) else "Unknown"),"message":m.message,"created_at":m.created_at.isoformat()} for m in messages],
+        "messages":[{"id":m.id,"author":author_label(row,m,viewer,db),"message":m.message,"created_at":m.created_at.isoformat()} for m in messages],
     }
 
 
 @router.post("")
 def create_report(data: ReportIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    kind=data.target_type.upper(); target_owner(kind,data.target_id,db)
-    row=SafetyReport(reporter_id=user.id,target_type=kind,target_id=data.target_id,category=data.category.upper(),detail=data.detail)
+    kind=data.target_type.upper(); category=data.category.upper(); target_owner(kind,data.target_id,db)
+    duplicate=db.query(SafetyReport).filter(SafetyReport.reporter_id==user.id,SafetyReport.target_type==kind,SafetyReport.target_id==data.target_id,SafetyReport.category==category,SafetyReport.status=="OPEN").first()
+    if duplicate: raise HTTPException(409,f"You already have open case #{duplicate.id} for this target and category")
+    row=SafetyReport(reporter_id=user.id,target_type=kind,target_id=data.target_id,category=category,detail=data.detail)
     db.add(row);db.commit();db.refresh(row)
     return serialize(row,db,user)
 
@@ -113,9 +128,11 @@ def add_message(report_id:int,data:MessageIn,db:Session=Depends(get_db),user:Use
 def resolve_report(report_id:int,data:ResolutionIn,db:Session=Depends(get_db),admin:User=Depends(require_admin)):
     row=db.get(SafetyReport,report_id)
     if not row: raise HTTPException(404,"Report not found")
+    if row.status in {"RESOLVED","DISMISSED"}: raise HTTPException(409,"This case already has a final moderation decision")
     status=data.status.upper();action=data.action.upper()
     if status not in {"RESOLVED","DISMISSED"}: raise HTTPException(400,"Resolution status must be RESOLVED or DISMISSED")
     if action not in {"NONE","HIDE_REVIEW","SUSPEND_PROJECT","SUSPEND_CAMPAIGN"}: raise HTTPException(400,"Invalid resolution action")
+    if status=="DISMISSED" and action!="NONE": raise HTTPException(400,"Dismissed cases cannot apply a moderation penalty")
     if action=="HIDE_REVIEW":
         if row.target_type!="REVIEW": raise HTTPException(400,"HIDE_REVIEW requires a review report")
         target=db.get(ProjectReview,row.target_id);target.status="HIDDEN"
