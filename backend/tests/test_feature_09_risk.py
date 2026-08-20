@@ -1,5 +1,7 @@
 from fastapi.testclient import TestClient
 from app.main import app
+from app.db import SessionLocal
+from app.risk_models import DeviceInstallObservation
 
 
 def login(client,email,password):
@@ -7,7 +9,7 @@ def login(client,email,password):
     return {'Authorization':f"Bearer {r.json()['access_token']}"}
 
 
-def test_duplicate_payout_signal_and_restriction_enforcement():
+def test_anti_sybil_signals_privacy_and_restriction_enforcement():
     with TestClient(app) as client:
         admin=login(client,'admin@demo.nubagz.com','Admin123!')
         creator=login(client,'creator@demo.nubagz.com','Creator123!')
@@ -15,17 +17,44 @@ def test_duplicate_payout_signal_and_restriction_enforcement():
         b=client.post('/api/auth/register',json={'email':'risk-b@example.com','username':'RiskBUser','password':'RiskPass123!'})
         assert a.status_code==200 and b.status_code==200
         ah={'Authorization':f"Bearer {a.json()['access_token']}"};bh={'Authorization':f"Bearer {b.json()['access_token']}"}
+
+        install_id='nubagz-local-install-1234567890'
+        assert client.post('/api/risk/context',headers=ah,json={'install_id':install_id}).status_code==200
+        assert client.post('/api/risk/context',headers=bh,json={'install_id':install_id}).status_code==200
+        db=SessionLocal()
+        try:
+            rows=db.query(DeviceInstallObservation).all()
+            assert rows
+            assert all(row.install_hash != install_id for row in rows)
+            assert all(len(row.install_hash)==64 for row in rows)
+        finally:
+            db.close()
+
         address='0x9999999999999999999999999999999999999999'
         assert client.post('/api/users/payout-addresses',headers=ah,json={'address':address,'chain':'Avalanche','label':'Wallet A','make_primary':True}).status_code==200
         assert client.post('/api/users/payout-addresses',headers=bh,json={'address':address,'chain':'Avalanche','label':'Wallet B','make_primary':True}).status_code==200
         risk=client.post('/api/risk/evaluate',headers=bh)
         assert risk.status_code==200
-        assert risk.json()['risk_score']>=30
-        assert risk.json()['trust_level']=='REVIEW'
-        assert any(s['type']=='SHARED_PAYOUT_ADDRESS' for s in risk.json()['signals'])
+        data=risk.json()
+        assert data['risk_score']>=60
+        assert data['risk_band']=='HIGH'
+        assert data['trust_level']=='REVIEW'
+        assert data['can_earn'] is True
+        assert any(s['type']=='SHARED_PAYOUT_ADDRESS' for s in data['signals'])
+        assert any(s['type']=='SHARED_DEVICE_INSTALL' for s in data['signals'])
+        assert 'cross-site' in data['privacy_note']
 
-        restricted=client.post(f"/api/risk/users/{b.json()['user']['id']}/trust",headers=admin,json={'trust_level':'RESTRICTED'})
-        assert restricted.status_code==200
+        restricted=client.post(f"/api/risk/users/{b.json()['user']['id']}/trust",headers=admin,json={'trust_level':'RESTRICTED','note':'Shared payout and local install signal require manual verification.'})
+        assert restricted.status_code==200 and restricted.json()['can_earn'] is False
+        queue=client.get('/api/risk/users',headers=admin)
+        assert queue.status_code==200
+        reviewed=next(row for row in queue.json() if row['user_id']==b.json()['user']['id'])
+        assert reviewed['latest_review']['trust_level']=='RESTRICTED'
+        assert 'manual verification' in reviewed['latest_review']['note']
+
+        overview=client.get('/api/admin/overview',headers=admin)
+        assert overview.status_code==200 and overview.json()['open_flags']>=2
+
         target=next(c for c in client.get('/api/campaigns/mine',headers=creator).json() if c['status']=='LIVE')
         blocked=client.post(f"/api/campaigns/{target['id']}/enroll",headers=bh)
         assert blocked.status_code==403 and 'restricted' in blocked.json()['detail'].lower()
