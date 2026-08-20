@@ -21,15 +21,26 @@ def test_notifications_are_private_deduped_and_read_state_persists():
         matches=[n for n in first.json()['notifications'] if 'Feature Fifteen Signals' in n['title']]
         assert len(matches)==1 and matches[0]['read'] is False
         notice_id=matches[0]['id']
-        count=len(first.json()['notifications'])
+        count=first.json()['total_count']
+        assert count==len(first.json()['notifications'])
+        assert first.json()['unread_count']>=1
 
         again=client.get('/api/notifications',headers=creator);assert again.status_code==200
-        assert len(again.json()['notifications'])==count
+        assert again.json()['total_count']==count
+        assert len([n for n in again.json()['notifications'] if n['id']==notice_id])==1
+
         other=client.get('/api/notifications',headers=earner);assert other.status_code==200
         assert all(n['id']!=notice_id for n in other.json()['notifications'])
         assert client.post(f'/api/notifications/{notice_id}/read',headers=earner).status_code==404
 
         marked=client.post(f'/api/notifications/{notice_id}/read',headers=creator);assert marked.status_code==200
         assert marked.json()['read'] is True and marked.json()['read_at']
-        persisted=client.get('/api/notifications',headers=creator).json()['notifications']
-        assert next(n for n in persisted if n['id']==notice_id)['read'] is True
+        persisted=client.get('/api/notifications',headers=creator).json()
+        assert next(n for n in persisted['notifications'] if n['id']==notice_id)['read'] is True
+
+        read_all=client.post('/api/notifications/read-all',headers=creator);assert read_all.status_code==200
+        after_all=client.get('/api/notifications',headers=creator).json()
+        assert after_all['unread_count']==0
+        assert all(n['read'] is True for n in after_all['notifications'])
+        repeated=client.post('/api/notifications/read-all',headers=creator);assert repeated.status_code==200
+        assert repeated.json()['marked_read']==0
