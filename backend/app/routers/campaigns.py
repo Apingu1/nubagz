@@ -9,6 +9,7 @@ from ..models import User, Project, Campaign, Mission, Enrollment, MissionComple
 from ..economy_models import OnchainRule, OnchainProof, CampaignAccessRule, CampaignFunding
 from ..risk_models import UserTrustProfile
 from ..marketplace_models import BagBuilderPathway, BagBuilderAttribution
+from ..engagement_models import ReferralConversion
 from ..schemas import CampaignCreate, CampaignOut, MissionCompleteIn
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
@@ -85,6 +86,8 @@ def complete_mission(campaign_id: int, mission_id: int, data: MissionCompleteIn,
     if not mission: raise HTTPException(404, "Mission not found")
     enrollment = db.query(Enrollment).filter(Enrollment.user_id == user.id, Enrollment.campaign_id == campaign_id).first()
     if not enrollment: raise HTTPException(400, "Join this Bag first")
+    trust = db.query(UserTrustProfile).filter(UserTrustProfile.user_id == user.id).first()
+    if trust and trust.trust_level == "RESTRICTED": raise HTTPException(403, "This account is restricted from completing reward opportunities pending trust review")
     if db.query(MissionCompletion).filter(MissionCompletion.user_id == user.id, MissionCompletion.mission_id == mission_id).first(): raise HTTPException(409, "Mission already completed")
     onchain_rule = db.query(OnchainRule).filter(OnchainRule.mission_id == mission_id).first()
     if onchain_rule and not db.query(OnchainProof).filter(OnchainProof.rule_id == onchain_rule.id, OnchainProof.user_id == user.id).first(): raise HTTPException(400, "Complete this mission's on-chain verification before claiming completion")
@@ -115,8 +118,16 @@ def complete_mission(campaign_id: int, mission_id: int, data: MissionCompleteIn,
         if builder_id and builder_amount > 0:
             db.add(LedgerEntry(user_id=builder_id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=builder_amount, entry_type="BUILDER_SHARE", note=f"BagBuilder share from {campaign.title}"))
         db.add(LedgerEntry(user_id=None, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=platform_amount, entry_type="PLATFORM_SHARE", note="NuBagz campaign share"))
-        if user.referred_by_id and referral_amount > 0: db.add(LedgerEntry(user_id=user.referred_by_id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=referral_amount, entry_type="REFERRAL_SHARE", note=f"Referral reward from {user.username}"))
-        else: db.add(LedgerEntry(user_id=None, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=referral_amount, entry_type="COMMUNITY_SHARE", note="Unassigned referral share"))
+        if user.referred_by_id and referral_amount > 0:
+            referrer_profile = db.query(UserTrustProfile).filter(UserTrustProfile.user_id == user.referred_by_id).first()
+            if referrer_profile and referrer_profile.trust_level == "RESTRICTED":
+                db.add(LedgerEntry(user_id=None, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=referral_amount, entry_type="COMMUNITY_SHARE", note="Referral share redirected because referrer is restricted"))
+                db.add(ReferralConversion(referrer_id=user.referred_by_id, referred_user_id=user.id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, allocated_amount=referral_amount, paid_amount=0, status="REDIRECTED", reason="Referrer restricted at settlement"))
+            else:
+                db.add(LedgerEntry(user_id=user.referred_by_id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=referral_amount, entry_type="REFERRAL_SHARE", note=f"Referral reward from {user.username}"))
+                db.add(ReferralConversion(referrer_id=user.referred_by_id, referred_user_id=user.id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, allocated_amount=referral_amount, paid_amount=referral_amount, status="PAID", reason="Funded campaign conversion"))
+        else:
+            db.add(LedgerEntry(user_id=None, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=referral_amount, entry_type="COMMUNITY_SHARE", note="Unassigned referral share"))
         user.bag_score = min(1000, user.bag_score + 20)
     db.commit(); return {"ok": True, "completed": completed_now, "xp": user.xp, "bag_score": user.bag_score}
 
