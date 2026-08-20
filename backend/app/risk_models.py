@@ -30,3 +30,24 @@ class FraudSignal(Base):
     status: Mapped[str] = mapped_column(String(24), default="OPEN", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class DeviceInstallObservation(Base):
+    """App-local anti-abuse signal. Only an HMAC of a random NuBagz install ID is stored."""
+    __tablename__ = "device_install_observations"
+    __table_args__ = (UniqueConstraint("user_id", "install_hash", name="uq_user_device_install"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    install_hash: Mapped[str] = mapped_column(String(64), index=True)
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class RiskReview(Base):
+    __tablename__ = "risk_reviews"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    reviewed_by_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    trust_level: Mapped[str] = mapped_column(String(24))
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now, index=True)
