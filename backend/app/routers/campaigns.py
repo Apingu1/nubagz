@@ -11,6 +11,7 @@ from ..risk_models import UserTrustProfile
 from ..marketplace_models import BagBuilderPathway, BagBuilderAttribution
 from ..engagement_models import ReferralConversion
 from ..schemas import CampaignCreate, CampaignOut, MissionCompleteIn
+from .risk import evaluate_user
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 
@@ -68,8 +69,8 @@ def enroll(campaign_id: int, db: Session = Depends(get_db), user: User = Depends
     existing = db.query(Enrollment).filter(Enrollment.user_id == user.id, Enrollment.campaign_id == campaign_id).first()
     if existing: return {"ok": True, "enrollment_id": existing.id, "status": existing.status}
     if not funding_available(db, campaign, Decimal(campaign.gross_reward_per_user)): raise HTTPException(409, "This Bag is temporarily unavailable because verified reward inventory is exhausted")
-    trust = db.query(UserTrustProfile).filter(UserTrustProfile.user_id == user.id).first()
-    if trust and trust.trust_level == "RESTRICTED": raise HTTPException(403, "This account is restricted from new reward opportunities pending trust review")
+    trust = evaluate_user(db, user)
+    if trust.trust_level == "RESTRICTED": raise HTTPException(403, "This account is restricted from new reward opportunities pending trust review")
     access_rule = db.query(CampaignAccessRule).filter(CampaignAccessRule.campaign_id == campaign_id).first()
     if access_rule and user.bag_score < access_rule.min_bag_score: raise HTTPException(403, f"BagScore {access_rule.min_bag_score}+ required for this opportunity")
     enrolled_count = db.query(func.count(Enrollment.id)).filter(Enrollment.campaign_id == campaign_id).scalar() or 0
@@ -86,8 +87,8 @@ def complete_mission(campaign_id: int, mission_id: int, data: MissionCompleteIn,
     if not mission: raise HTTPException(404, "Mission not found")
     enrollment = db.query(Enrollment).filter(Enrollment.user_id == user.id, Enrollment.campaign_id == campaign_id).first()
     if not enrollment: raise HTTPException(400, "Join this Bag first")
-    trust = db.query(UserTrustProfile).filter(UserTrustProfile.user_id == user.id).first()
-    if trust and trust.trust_level == "RESTRICTED": raise HTTPException(403, "This account is restricted from completing reward opportunities pending trust review")
+    trust = evaluate_user(db, user)
+    if trust.trust_level == "RESTRICTED": raise HTTPException(403, "This account is restricted from completing reward opportunities pending trust review")
     if db.query(MissionCompletion).filter(MissionCompletion.user_id == user.id, MissionCompletion.mission_id == mission_id).first(): raise HTTPException(409, "Mission already completed")
     onchain_rule = db.query(OnchainRule).filter(OnchainRule.mission_id == mission_id).first()
     if onchain_rule and not db.query(OnchainProof).filter(OnchainProof.rule_id == onchain_rule.id, OnchainProof.user_id == user.id).first(): raise HTTPException(400, "Complete this mission's on-chain verification before claiming completion")
