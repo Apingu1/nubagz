@@ -7,13 +7,13 @@ from ..db import get_db
 from ..deps import get_current_user
 from ..models import User, Project, Campaign, Mission, Enrollment, MissionCompletion, LedgerEntry
 from ..economy_models import OnchainRule, OnchainProof, CampaignAccessRule, CampaignFunding
-from ..risk_models import UserTrustProfile
 from ..marketplace_models import BagBuilderPathway, BagBuilderAttribution
 from ..engagement_models import ReferralConversion
 from ..schemas import CampaignCreate, CampaignOut, MissionCompleteIn
 from .risk import evaluate_user
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
+REFERRAL_ELIGIBLE_LEVELS = {"NORMAL", "VERIFIED"}
 
 
 def serialize_campaign(c: Campaign, db: Session) -> CampaignOut:
@@ -98,6 +98,13 @@ def complete_mission(campaign_id: int, mission_id: int, data: MissionCompleteIn,
         if not verified: raise HTTPException(400, "That answer is not correct")
     will_complete = enrollment.completed_count + 1 >= len(campaign.missions); gross = Decimal(campaign.gross_reward_per_user)
     if will_complete and not funding_available(db, campaign, gross): raise HTTPException(409, "Reward inventory was exhausted before this Bag could settle. No final completion was recorded.")
+
+    referrer_profile = None
+    if will_complete and user.referred_by_id:
+        referrer = db.get(User, user.referred_by_id)
+        if referrer:
+            referrer_profile = evaluate_user(db, referrer)
+
     db.add(MissionCompletion(user_id=user.id, mission_id=mission_id, answer=data.answer, verified=verified)); enrollment.completed_count += 1
     user.xp += mission.xp_reward; user.bag_score = min(1000, user.bag_score + max(1, mission.xp_reward // 10)); completed_now = False
     if will_complete:
@@ -120,10 +127,10 @@ def complete_mission(campaign_id: int, mission_id: int, data: MissionCompleteIn,
             db.add(LedgerEntry(user_id=builder_id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=builder_amount, entry_type="BUILDER_SHARE", note=f"BagBuilder share from {campaign.title}"))
         db.add(LedgerEntry(user_id=None, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=platform_amount, entry_type="PLATFORM_SHARE", note="NuBagz campaign share"))
         if user.referred_by_id and referral_amount > 0:
-            referrer_profile = db.query(UserTrustProfile).filter(UserTrustProfile.user_id == user.referred_by_id).first()
-            if referrer_profile and referrer_profile.trust_level == "RESTRICTED":
-                db.add(LedgerEntry(user_id=None, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=referral_amount, entry_type="COMMUNITY_SHARE", note="Referral share redirected because referrer is restricted"))
-                db.add(ReferralConversion(referrer_id=user.referred_by_id, referred_user_id=user.id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, allocated_amount=referral_amount, paid_amount=0, status="REDIRECTED", reason="Referrer restricted at settlement"))
+            referrer_level = referrer_profile.trust_level if referrer_profile else "REVIEW"
+            if referrer_level not in REFERRAL_ELIGIBLE_LEVELS:
+                db.add(LedgerEntry(user_id=None, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=referral_amount, entry_type="COMMUNITY_SHARE", note=f"Referral share redirected because referrer trust is {referrer_level}"))
+                db.add(ReferralConversion(referrer_id=user.referred_by_id, referred_user_id=user.id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, allocated_amount=referral_amount, paid_amount=0, status="REDIRECTED", reason=f"Referrer {referrer_level.lower()} at settlement"))
             else:
                 db.add(LedgerEntry(user_id=user.referred_by_id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=referral_amount, entry_type="REFERRAL_SHARE", note=f"Referral reward from {user.username}"))
                 db.add(ReferralConversion(referrer_id=user.referred_by_id, referred_user_id=user.id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, allocated_amount=referral_amount, paid_amount=referral_amount, status="PAID", reason="Funded campaign conversion"))
