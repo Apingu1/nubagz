@@ -9,6 +9,11 @@ from ..engagement_models import ReferralConversion
 from ..risk_models import UserTrustProfile
 
 router = APIRouter(prefix="/api/referrals", tags=["referrals"])
+REFERRAL_ELIGIBLE_LEVELS = {"NORMAL", "VERIFIED"}
+
+
+def referral_reward_eligible(profile: UserTrustProfile | None) -> bool:
+    return profile is None or profile.trust_level in REFERRAL_ELIGIBLE_LEVELS
 
 
 @router.get("/validate/{code}")
@@ -17,12 +22,14 @@ def validate_referral(code: str, db: Session = Depends(get_db)):
     if not user:
         return {"valid": False, "eligible": False}
     profile = db.query(UserTrustProfile).filter(UserTrustProfile.user_id == user.id).first()
-    eligible = not profile or profile.trust_level != "RESTRICTED"
-    return {"valid": True, "eligible": eligible, "referrer": user.username if eligible else None}
+    eligible = referral_reward_eligible(profile)
+    return {"valid": True, "eligible": eligible, "referrer": user.username if eligible else None, "trust_level": profile.trust_level if profile else "NORMAL"}
 
 
 @router.get("/me")
 def my_referrals(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    profile = db.query(UserTrustProfile).filter(UserTrustProfile.user_id == user.id).first()
+    reward_eligible = referral_reward_eligible(profile)
     referred = db.query(User).filter(User.referred_by_id == user.id).order_by(User.created_at.desc()).all()
     referred_ids = [u.id for u in referred]
     conversions = db.query(ReferralConversion).filter(ReferralConversion.referrer_id == user.id).order_by(ReferralConversion.created_at.desc()).all()
@@ -73,6 +80,8 @@ def my_referrals(db: Session = Depends(get_db), user: User = Depends(get_current
     return {
         "referral_code": user.referral_code,
         "referral_path": f"/register?ref={user.referral_code}",
+        "reward_eligible": reward_eligible,
+        "trust_level": profile.trust_level if profile else "NORMAL",
         "referred_users": total_people,
         "converted_users": len(converted_user_ids),
         "pending_users": max(0, total_people - len(converted_user_ids)),
@@ -83,5 +92,5 @@ def my_referrals(db: Session = Depends(get_db), user: User = Depends(get_current
         "people": people,
         "events": events,
         "rule": "No reward is paid for a signup. Referral earnings are created only when a referred user completes a campaign with a pre-funded referral allocation.",
-        "abuse_rule": "If a referrer is restricted for anti-farming review at settlement, that campaign's referral allocation is redirected to the community treasury instead of being paid to the referrer.",
+        "abuse_rule": "Referral attribution and payouts require a NORMAL or VERIFIED referrer. If the referrer is under REVIEW or RESTRICTED at settlement, that campaign's referral allocation is redirected to the community treasury.",
     }
