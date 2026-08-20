@@ -3,7 +3,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .db import Base, engine, SessionLocal
-from . import economy_models, risk_models, marketplace_models, engagement_models, integration_models  # noqa: F401 - registers extension tables
+from . import economy_models, risk_models, marketplace_models, engagement_models, integration_models, trust_models  # noqa: F401 - registers extension tables
 from .seed import seed_demo
 from .routers import auth, projects, campaigns, users, admin, funding, earnings, prices, bagdrops, daily, onchain, trust, access, risk, referrals, builders, bounties, revenue_share, recommendations, notifications, project_analytics, templates, reviews, reports, activity, trending, watchbag, swaps, gas
 
