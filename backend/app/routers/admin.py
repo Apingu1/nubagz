@@ -6,6 +6,7 @@ from ..db import get_db
 from ..deps import require_admin
 from ..models import User, Project, Campaign, Enrollment, LedgerEntry, Withdrawal, FraudFlag
 from ..economy_models import CampaignFunding
+from ..risk_models import FraudSignal
 from ..schemas import AdminDecision
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -13,6 +14,8 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 @router.get("/overview")
 def overview(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+    legacy_flags = db.query(func.count(FraudFlag.id)).filter(FraudFlag.status == "OPEN").scalar() or 0
+    risk_signals = db.query(func.count(FraudSignal.id)).filter(FraudSignal.status == "OPEN").scalar() or 0
     return {
         "users": db.query(func.count(User.id)).scalar() or 0,
         "projects": db.query(func.count(Project.id)).scalar() or 0,
@@ -21,7 +24,7 @@ def overview(db: Session = Depends(get_db), _: User = Depends(require_admin)):
         "pending_projects": db.query(func.count(Project.id)).filter(Project.status == "PENDING").scalar() or 0,
         "pending_campaigns": db.query(func.count(Campaign.id)).filter(Campaign.status == "PENDING").scalar() or 0,
         "pending_withdrawals": db.query(func.count(Withdrawal.id)).filter(Withdrawal.status == "PENDING").scalar() or 0,
-        "open_flags": db.query(func.count(FraudFlag.id)).filter(FraudFlag.status == "OPEN").scalar() or 0,
+        "open_flags": int(legacy_flags) + int(risk_signals),
     }
 
 
