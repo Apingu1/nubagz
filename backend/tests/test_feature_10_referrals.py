@@ -20,11 +20,14 @@ def complete_one_step(client, headers, campaign_id):
 
 def test_referrals_pay_only_for_funded_conversions_and_reviewed_rewards_redirect():
     with TestClient(app) as client:
-        referrer=login(client,'demo@demo.nubagz.com','Demo123!')
         creator=login(client,'creator@demo.nubagz.com','Creator123!')
         admin=login(client,'admin@demo.nubagz.com','Admin123!')
-        referrer_id=client.get('/api/auth/me',headers=referrer).json()['id']
-        client.post(f'/api/risk/users/{referrer_id}/trust',headers=admin,json={'trust_level':'NORMAL','note':'Feature 10 test baseline'})
+        referrer_signup=client.post('/api/auth/register',json={'email':'feature10-referrer@example.com','username':'Feature10Referrer','password':'Referral123!'})
+        assert referrer_signup.status_code==200
+        referrer={'Authorization':f"Bearer {referrer_signup.json()['access_token']}"}
+        referrer_id=referrer_signup.json()['user']['id']
+        clean=client.post('/api/risk/evaluate',headers=referrer)
+        assert clean.status_code==200 and clean.json()['trust_level']=='NORMAL' and clean.json()['risk_score']<30
 
         invalid=client.post('/api/auth/register',json={'email':'feature10-invalid@example.com','username':'Feature10Invalid','password':'Referral123!','referral_code':'NOTAREALCODE'})
         assert invalid.status_code==400 and 'Referral code' in invalid.json()['detail']
@@ -62,6 +65,7 @@ def test_referrals_pay_only_for_funded_conversions_and_reviewed_rewards_redirect
 
         complete_one_step(client,first_h,cid)
         paid=client.get('/api/referrals/me',headers=referrer).json()
+        assert paid['reward_eligible'] is True
         assert earnings_for(paid,'REF10')==before_reward+5
         assert paid['completed_campaign_conversions']>=1
         assert any(e['status']=='PAID' and e['referred_username']=='Feature10RefA' and float(e['paid_amount'])==5 for e in paid['events'])
