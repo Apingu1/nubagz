@@ -86,3 +86,18 @@ class WatchBag(Base):
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
     campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+
+
+class ReferralConversion(Base):
+    __tablename__ = "referral_conversions"
+    __table_args__ = (UniqueConstraint("referred_user_id", "campaign_id", name="uq_referral_conversion_user_campaign"),)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    referrer_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    referred_user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    campaign_id: Mapped[int] = mapped_column(ForeignKey("campaigns.id"), index=True)
+    asset_symbol: Mapped[str] = mapped_column(String(24), index=True)
+    allocated_amount: Mapped[Decimal] = mapped_column(Numeric(36, 8), default=0)
+    paid_amount: Mapped[Decimal] = mapped_column(Numeric(36, 8), default=0)
+    status: Mapped[str] = mapped_column(String(24), default="PAID", index=True)
+    reason: Mapped[str] = mapped_column(String(255), default="Funded referral conversion")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now, index=True)
