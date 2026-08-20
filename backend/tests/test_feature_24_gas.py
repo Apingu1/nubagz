@@ -17,7 +17,7 @@ def verify_wallet(client,headers,account):
     assert verified.status_code==200
 
 
-def test_sponsored_gas_requires_full_project_funding_and_provider_failure_spends_nothing():
+def test_sponsored_gas_requires_independent_full_project_funding_and_provider_failure_spends_nothing():
     original_url=settings.gas_sponsor_provider_base_url;original_key=settings.gas_sponsor_provider_api_key
     settings.gas_sponsor_provider_base_url=None;settings.gas_sponsor_provider_api_key=None
     try:
@@ -35,10 +35,18 @@ def test_sponsored_gas_requires_full_project_funding_and_provider_failure_spends
 
             under=client.post('/api/gas/budgets',headers=creator,json={'project_id':pid,'chain':'Avalanche','amount_per_tx':0.01,'max_transactions':2,'funded_amount':0.019,'funding_reference':'feature24-under'})
             assert under.status_code==400 and 'maximum obligation' in under.json()['detail']
-            budget=client.post('/api/gas/budgets',headers=creator,json={'project_id':pid,'chain':'Avalanche','amount_per_tx':0.01,'max_transactions':2,'funded_amount':0.02,'funding_reference':'feature24-funded'})
-            assert budget.status_code==200 and budget.json()['status']=='PENDING'
-            bid=budget.json()['id'];assert client.post(f'/api/gas/budgets/{bid}/activate',headers=admin).status_code==200
-            request=client.post(f'/api/gas/budgets/{bid}/requests',headers=user,json={'campaign_id':cid,'transaction':{'to':'0x1111111111111111111111111111111111111111','data':'0x','value':'0x0'}})
+            budget=client.post('/api/gas/budgets',headers=creator,json={'project_id':pid,'chain':'Avalanche','amount_per_tx':0.01,'max_transactions':2,'funded_amount':0.02,'funding_reference':'feature24-declared'})
+            assert budget.status_code==200 and budget.json()['status']=='PENDING' and budget.json()['funding_status']=='DECLARED'
+            bid=budget.json()['id']
+            insufficient=client.post(f'/api/gas/budgets/{bid}/activate',headers=admin,json={'funded_amount':0.019,'funding_reference':'feature24-verified-under'})
+            assert insufficient.status_code==400
+            activated=client.post(f'/api/gas/budgets/{bid}/activate',headers=admin,json={'funded_amount':0.02,'funding_reference':'feature24-verified'})
+            assert activated.status_code==200 and activated.json()['funding_status']=='VERIFIED' and activated.json()['status']=='LIVE'
+            assert client.post(f'/api/gas/budgets/{bid}/activate',headers=admin,json={'funded_amount':0.02,'funding_reference':'feature24-repeat'}).status_code==409
+
+            bad_tx=client.post(f'/api/gas/budgets/{bid}/requests',headers=user,json={'campaign_id':cid,'transaction':{'to':'0x1234','data':'0x','value':'0x0'}})
+            assert bad_tx.status_code==400
+            request=client.post(f'/api/gas/budgets/{bid}/requests',headers=user,json={'campaign_id':cid,'transaction':{'to':'0x1111111111111111111111111111111111111111','data':'0x','value':'0x0','chainId':43114}})
             assert request.status_code==200 and request.json()['status']=='DRAFT'
             rid=request.json()['id']
             execution=client.post(f'/api/gas/requests/{rid}/execute',headers=user)
