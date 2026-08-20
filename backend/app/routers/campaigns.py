@@ -10,6 +10,7 @@ from ..economy_models import OnchainRule, OnchainProof, CampaignAccessRule, Camp
 from ..marketplace_models import BagBuilderPathway, BagBuilderAttribution
 from ..engagement_models import ReferralConversion
 from ..schemas import CampaignCreate, CampaignOut, MissionCompleteIn
+from ..economy import campaign_distributed_total
 from .risk import evaluate_user
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
@@ -26,8 +27,8 @@ def serialize_campaign(c: Campaign, db: Session) -> CampaignOut:
 def funding_available(db: Session, campaign: Campaign, next_gross: Decimal = Decimal("0")) -> bool:
     funding = db.query(CampaignFunding).filter(CampaignFunding.campaign_id == campaign.id, CampaignFunding.status == "VERIFIED").first()
     if not funding: return False
-    distributed = db.query(func.coalesce(func.sum(LedgerEntry.amount), 0)).filter(LedgerEntry.campaign_id == campaign.id).scalar() or Decimal("0")
-    return Decimal(funding.verified_amount) - Decimal(distributed) >= next_gross
+    distributed = campaign_distributed_total(db, campaign.id)
+    return Decimal(funding.verified_amount) - distributed >= next_gross
 
 
 @router.get("", response_model=list[CampaignOut])

@@ -4,9 +4,10 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from ..db import get_db
 from ..deps import get_current_user
-from ..models import User, Campaign, Enrollment, LedgerEntry
+from ..models import User, Campaign, Enrollment
 from ..economy_models import BagDrop, BagDropItem, BagDropClaim, AssetPriceSnapshot, CampaignFunding, CampaignAccessRule
 from ..risk_models import UserTrustProfile
+from ..economy import campaign_distributed_total
 
 router = APIRouter(prefix="/api/daily", tags=["daily-earn"])
 
@@ -28,8 +29,8 @@ def campaign_is_eligible(db: Session, user: User, campaign: Campaign) -> bool:
     funding = db.query(CampaignFunding).filter(CampaignFunding.campaign_id == campaign.id, CampaignFunding.status == "VERIFIED").first()
     if not funding:
         return False
-    distributed = db.query(func.coalesce(func.sum(LedgerEntry.amount), 0)).filter(LedgerEntry.campaign_id == campaign.id).scalar() or Decimal("0")
-    return Decimal(funding.verified_amount) - Decimal(distributed) >= Decimal(campaign.gross_reward_per_user)
+    distributed = campaign_distributed_total(db, campaign.id)
+    return Decimal(funding.verified_amount) - distributed >= Decimal(campaign.gross_reward_per_user)
 
 
 @router.get("/earn")
