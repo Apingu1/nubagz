@@ -129,12 +129,16 @@ def evaluate_user(db: Session, user: User):
             db.add(FraudSignal(user_id=user.id, signal_type=signal_type, severity=severity, detail=detail))
 
     profile.risk_score = min(100, score)
-    if profile.trust_level != "RESTRICTED":
+    latest_review = db.query(RiskReview).filter(RiskReview.user_id == user.id).order_by(RiskReview.created_at.desc(), RiskReview.id.desc()).first()
+    manual_hold = latest_review and latest_review.trust_level in {"REVIEW", "RESTRICTED"}
+    if manual_hold:
+        profile.trust_level = latest_review.trust_level
+    else:
         if score >= 60:
             profile.trust_level = "REVIEW"
         elif score >= 30 and profile.trust_level != "VERIFIED":
             profile.trust_level = "REVIEW"
-        elif score < 30 and profile.trust_level not in {"VERIFIED"}:
+        elif score < 30 and profile.trust_level != "VERIFIED":
             profile.trust_level = "NORMAL"
     profile.last_evaluated_at = datetime.now(UTC)
     db.commit()
@@ -145,12 +149,14 @@ def payload(db: Session, profile: UserTrustProfile):
     signals = db.query(FraudSignal).filter(
         FraudSignal.user_id == profile.user_id, FraudSignal.status == "OPEN"
     ).order_by(FraudSignal.created_at.desc()).all()
+    latest_review = db.query(RiskReview).filter(RiskReview.user_id == profile.user_id).order_by(RiskReview.created_at.desc(), RiskReview.id.desc()).first()
     return {
         "user_id": profile.user_id,
         "trust_level": profile.trust_level,
         "risk_score": profile.risk_score,
         "risk_band": risk_band(profile.risk_score),
         "can_earn": profile.trust_level != "RESTRICTED",
+        "manual_hold": bool(latest_review and latest_review.trust_level in {"REVIEW", "RESTRICTED"}),
         "last_evaluated_at": profile.last_evaluated_at.isoformat(),
         "signals": [{"id": s.id, "type": s.signal_type, "severity": s.severity, "detail": s.detail} for s in signals],
         "privacy_note": "Device abuse checks use only an HMAC of a random NuBagz-local browser install ID. NuBagz does not create a cross-site device fingerprint.",
@@ -196,7 +202,7 @@ def risk_users(db: Session = Depends(get_db), _: User = Depends(require_admin)):
     for profile in profiles:
         item = payload(db, profile)
         account = db.get(User, profile.user_id)
-        review = db.query(RiskReview).filter(RiskReview.user_id == profile.user_id).order_by(RiskReview.created_at.desc()).first()
+        review = db.query(RiskReview).filter(RiskReview.user_id == profile.user_id).order_by(RiskReview.created_at.desc(), RiskReview.id.desc()).first()
         item.update({
             "username": account.username if account else f"User #{profile.user_id}",
             "email": account.email if account else None,
