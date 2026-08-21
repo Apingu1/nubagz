@@ -118,10 +118,11 @@ function validateAvif(buffer, variant) {
   const dimensions = findLargestIspeDimensions(buffer)
   if (!dimensions) throw new Error(`${variant}: could not read AVIF dimensions`)
 
-  // The approved Bag Z masters are 1254px square. A 1000px floor prevents us
-  // accidentally treating the old 256/384px delivery images as a master again.
-  if (dimensions.width < 1000 || dimensions.height < 1000) {
-    throw new Error(`${variant}: ${dimensions.width}x${dimensions.height} is not a high-resolution master`)
+  // The approved canonical Bag Z master is 1254px square. Requiring at least
+  // that resolution prevents old 256/384px delivery images from being promoted
+  // to "HQ" and still allows larger future masters.
+  if (dimensions.width < 1254 || dimensions.height < 1254) {
+    throw new Error(`${variant}: ${dimensions.width}x${dimensions.height} is below the 1254px master floor`)
   }
 
   return dimensions
@@ -224,7 +225,7 @@ async function writeGeneratedSourceMap(hqVariants) {
   lines.push('export const bagZHqSources = {')
   for (const variant of variants) {
     const source = hqVariants.has(variant)
-      ? `'${`/bag-z-hq/${variant}.avif`}'`
+      ? `'/bag-z-hq/${variant}.avif'`
       : 'null'
     lines.push(`  ${variant}: ${source},`)
   }
