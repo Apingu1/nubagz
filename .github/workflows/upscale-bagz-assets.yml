@@ -1,0 +1,57 @@
+name: Upscale Bag Z site assets
+
+on:
+  push:
+    branches: [feature/bag-z-art-pack]
+    paths:
+      - '.bagz_upscale/READY'
+
+permissions:
+  contents: write
+
+jobs:
+  upscale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Pillow
+        run: pip install pillow
+      - name: Build sharper 1024px delivery assets
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from PIL import Image, ImageFilter
+
+          root = Path('frontend/public/bag-z')
+          names = ['base','hello','detective','wallet','loot','security','warning','confused','sleepy','victory']
+          for name in names:
+              path = root / f'{name}.webp'
+              im = Image.open(path).convert('RGBA')
+              target = 1024
+              ratio = min(target / im.width, target / im.height)
+              size = (max(1, round(im.width * ratio)), max(1, round(im.height * ratio)))
+              im = im.resize(size, Image.Resampling.LANCZOS)
+              # Light edge restoration prevents the large UI placements reading as browser-scaled thumbnails.
+              rgb = im.convert('RGB').filter(ImageFilter.UnsharpMask(radius=1.15, percent=125, threshold=2))
+              alpha = im.getchannel('A')
+              out = rgb.convert('RGBA')
+              out.putalpha(alpha)
+              out.save(path, 'WEBP', quality=96, alpha_quality=100, method=4)
+              print(name, size, path.stat().st_size)
+          PY
+      - name: Commit upgraded delivery assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .bagz_upscale
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add frontend/public/bag-z .bagz_upscale
+          git commit -m 'Upgrade Bag Z delivery artwork to 1024px'
+          git push
