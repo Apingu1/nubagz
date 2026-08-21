@@ -1,5 +1,5 @@
 import { useLocation } from 'react-router-dom'
-import { bagZSources } from '../generated/bag-z-assets'
+import { bagZHqSources, bagZSources } from '../generated/bag-z-assets'
 
 export type BagZVariant =
   | 'base'
@@ -19,19 +19,24 @@ export function BagZMascot({
   label = 'Bag Z',
   decorative = true,
   eager = false,
+  preferHighResolution = false,
 }: {
   variant: BagZVariant
   className?: string
   label?: string
   decorative?: boolean
   eager?: boolean
+  preferHighResolution?: boolean
 }) {
   const fallbackSource = `/bag-z/${variant}.webp`
+  const source = preferHighResolution
+    ? (bagZHqSources[variant] ?? bagZHqSources.base)
+    : bagZSources[variant]
 
   return (
     <img
       className={`bag-z-mascot ${className}`.trim()}
-      src={bagZSources[variant]}
+      src={source}
       alt={decorative ? '' : label}
       aria-hidden={decorative ? true : undefined}
       loading={eager ? 'eager' : 'lazy'}
@@ -80,7 +85,7 @@ export function BagZRouteFeature() {
       <div className="bag-z-route-stage" aria-hidden="true">
         <i className="bag-z-orbit one" />
         <i className="bag-z-orbit two" />
-        <BagZMascot variant={feature.variant} className="bag-z-route-art" eager />
+        <BagZMascot variant={feature.variant} className="bag-z-route-art" eager preferHighResolution />
       </div>
     </section>
   )
