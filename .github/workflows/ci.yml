@@ -36,12 +36,11 @@ jobs:
           node-version: '22'
       - run: npm install
       - run: npm run build
-      - name: Verify complete HQ Bag Z delivery pack
+      - name: Verify bespoke premium Bag Z delivery pack
         run: |
-          test -s dist/bag-z-hq/base.avif
-          for variant in hello detective wallet loot security warning confused sleepy victory; do
-            test -s "dist/bag-z-hq/${variant}.svg"
-            grep -q 'data:image/avif;base64,' "dist/bag-z-hq/${variant}.svg"
+          set -euo pipefail
+          for variant in base hello detective wallet loot security warning confused sleepy victory; do
+            test -s "dist/bag-z-premium/${variant}.webp"
           done
       - name: Build production frontend container
         run: docker build -t nubagz-frontend-ci .
@@ -81,7 +80,7 @@ jobs:
           grep -q '<title>NuBagz' /tmp/nubagz-root.html
           grep -q '"status":"ok"' /tmp/nubagz-health.json
 
-      - name: Verify SPA fallback routes and HQ mascot assets
+      - name: Verify SPA fallback routes and premium mascot assets
         shell: bash
         run: |
           set -euo pipefail
@@ -93,8 +92,11 @@ jobs:
             grep -q '<title>NuBagz' /tmp/spa-route.html
           done
 
-          test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/bag-z-hq/base.avif)" = "200"
-          test "$(curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/bag-z-hq/detective.svg)" = "200"
+          for variant in base hello detective wallet loot security warning confused sleepy victory; do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' "http://127.0.0.1:8080/bag-z-premium/${variant}.webp")"
+            echo "Bag Z ${variant} -> ${code}"
+            test "$code" = "200"
+          done
 
       - name: Print production logs on failure
         if: failure()
