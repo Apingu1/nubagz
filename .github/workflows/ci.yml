@@ -36,7 +36,12 @@ jobs:
           node-version: '22'
       - run: npm install
       - run: npm run build
-      - name: Verify canonical Bag Z delivery asset
-        run: test -s dist/bag-z-hq/base.avif
+      - name: Verify complete HQ Bag Z delivery pack
+        run: |
+          test -s dist/bag-z-hq/base.avif
+          for variant in hello detective wallet loot security warning confused sleepy victory; do
+            test -s "dist/bag-z-hq/${variant}.svg"
+            grep -q 'data:image/avif;base64,' "dist/bag-z-hq/${variant}.svg"
+          done
       - name: Build production frontend container
         run: docker build -t nubagz-frontend-ci .
