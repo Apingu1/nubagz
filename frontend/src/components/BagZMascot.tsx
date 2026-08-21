@@ -13,16 +13,16 @@ export type BagZVariant =
   | 'victory'
 
 const premiumBagZSources: Record<BagZVariant, string> = {
-  base: '/bag-z-premium/base.webp',
-  hello: '/bag-z-premium/hello.webp',
-  detective: '/bag-z-premium/detective.webp',
-  wallet: '/bag-z-premium/wallet.webp',
-  loot: '/bag-z-premium/loot.webp',
-  security: '/bag-z-premium/security.webp',
-  warning: '/bag-z-premium/warning.webp',
-  confused: '/bag-z-premium/confused.webp',
-  sleepy: '/bag-z-premium/sleepy.webp',
-  victory: '/bag-z-premium/victory.webp',
+  base: '/bag-z-premium/base.avif',
+  hello: '/bag-z-premium/hello.avif',
+  detective: '/bag-z-premium/detective.avif',
+  wallet: '/bag-z-premium/wallet.avif',
+  loot: '/bag-z-premium/loot.avif',
+  security: '/bag-z-premium/security.avif',
+  warning: '/bag-z-premium/warning.avif',
+  confused: '/bag-z-premium/confused.avif',
+  sleepy: '/bag-z-premium/sleepy.avif',
+  victory: '/bag-z-premium/victory.avif',
 }
 
 export function BagZMascot({
