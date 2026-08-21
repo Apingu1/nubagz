@@ -1,4 +1,5 @@
 import { useLocation } from 'react-router-dom'
+import { bagZSources } from '../generated/bag-z-assets'
 
 export type BagZVariant =
   | 'base'
@@ -11,19 +12,6 @@ export type BagZVariant =
   | 'confused'
   | 'sleepy'
   | 'victory'
-
-const sources: Record<BagZVariant, string> = {
-  base: '/bag-z-hq/base.webp',
-  hello: '/bag-z-hq/hello.webp',
-  detective: '/bag-z-hq/detective.webp',
-  wallet: '/bag-z-hq/wallet.webp',
-  loot: '/bag-z-hq/loot.webp',
-  security: '/bag-z-hq/security.webp',
-  warning: '/bag-z-hq/warning.webp',
-  confused: '/bag-z-hq/confused.webp',
-  sleepy: '/bag-z-hq/sleepy.webp',
-  victory: '/bag-z-hq/victory.webp',
-}
 
 export function BagZMascot({
   variant,
@@ -38,14 +26,21 @@ export function BagZMascot({
   decorative?: boolean
   eager?: boolean
 }) {
+  const fallbackSource = `/bag-z/${variant}.webp`
+
   return (
     <img
       className={`bag-z-mascot ${className}`.trim()}
-      src={sources[variant]}
+      src={bagZSources[variant]}
       alt={decorative ? '' : label}
       aria-hidden={decorative ? true : undefined}
       loading={eager ? 'eager' : 'lazy'}
       decoding="async"
+      onError={(event) => {
+        if (!event.currentTarget.src.endsWith(fallbackSource)) {
+          event.currentTarget.src = fallbackSource
+        }
+      }}
     />
   )
 }
