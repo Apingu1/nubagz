@@ -142,6 +142,32 @@ async function assertFallbacksExist() {
   }
 }
 
+async function reconstructVariant(variant, chunks) {
+  chunks.sort((a, b) => a.part - b.part)
+  for (let i = 0; i < chunks.length; i += 1) {
+    if (chunks[i].part !== i + 1) {
+      throw new Error(`${variant}: master chunks are not contiguous from part 1`)
+    }
+  }
+
+  const encodedPieces = []
+  for (const chunk of chunks) {
+    const text = (await readFile(path.join(masterDir, chunk.entry), 'utf8')).replace(/\s+/g, '')
+    if (!/^[A-Za-z0-9+/=]+$/.test(text)) {
+      throw new Error(`${variant}: ${chunk.entry} contains invalid base64 characters`)
+    }
+    encodedPieces.push(text)
+  }
+
+  const encoded = encodedPieces.join('')
+  const buffer = Buffer.from(encoded, 'base64')
+  const dimensions = validateAvif(buffer, variant)
+  const output = path.join(hqDir, `${variant}.avif`)
+  await writeFile(output, buffer)
+
+  return { dimensions, bytes: buffer.length }
+}
+
 async function reconstructMasters() {
   const entries = await readdir(masterDir)
   const grouped = new Map()
@@ -162,29 +188,18 @@ async function reconstructMasters() {
   const hqVariants = new Map()
 
   for (const [variant, chunks] of grouped) {
-    chunks.sort((a, b) => a.part - b.part)
-    for (let i = 0; i < chunks.length; i += 1) {
-      if (chunks[i].part !== i + 1) {
-        throw new Error(`${variant}: master chunks are not contiguous from part 1`)
-      }
-    }
+    try {
+      const { dimensions, bytes } = await reconstructVariant(variant, chunks)
+      hqVariants.set(variant, dimensions)
+      console.log(`Bag Z HQ: ${variant} -> ${dimensions.width}x${dimensions.height} (${bytes} bytes)`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
 
-    const encodedPieces = []
-    for (const chunk of chunks) {
-      const text = (await readFile(path.join(masterDir, chunk.entry), 'utf8')).replace(/\s+/g, '')
-      if (!/^[A-Za-z0-9+/=]+$/.test(text)) {
-        throw new Error(`${variant}: ${chunk.entry} contains invalid base64 characters`)
-      }
-      encodedPieces.push(text)
+      // The canonical base master is mandatory. Optional contextual masters can be
+      // added incrementally; an incomplete transfer must never break the product.
+      if (variant === 'base') throw error
+      console.warn(`Bag Z HQ skipped: ${variant} (${message})`)
     }
-
-    const encoded = encodedPieces.join('')
-    const buffer = Buffer.from(encoded, 'base64')
-    const dimensions = validateAvif(buffer, variant)
-    const output = path.join(hqDir, `${variant}.avif`)
-    await writeFile(output, buffer)
-    hqVariants.set(variant, dimensions)
-    console.log(`Bag Z HQ: ${variant} -> ${dimensions.width}x${dimensions.height} (${buffer.length} bytes)`)
   }
 
   return hqVariants
@@ -206,6 +221,15 @@ async function writeGeneratedSourceMap(hqVariants) {
   }
 
   lines.push('} as const', '')
+  lines.push('export const bagZHqSources = {')
+  for (const variant of variants) {
+    const source = hqVariants.has(variant)
+      ? `'${`/bag-z-hq/${variant}.avif`}'`
+      : 'null'
+    lines.push(`  ${variant}: ${source},`)
+  }
+  lines.push('} as const', '')
+
   await writeFile(generatedMap, `${lines.join('\n')}\n`, 'utf8')
 }
 
