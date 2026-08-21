@@ -13,16 +13,16 @@ export type BagZVariant =
   | 'victory'
 
 const sources: Record<BagZVariant, string> = {
-  base: '/bag-z/base.webp',
-  hello: '/bag-z/hello.webp',
-  detective: '/bag-z/detective.webp',
-  wallet: '/bag-z/wallet.webp',
-  loot: '/bag-z/loot.webp',
-  security: '/bag-z/security.webp',
-  warning: '/bag-z/warning.webp',
-  confused: '/bag-z/confused.webp',
-  sleepy: '/bag-z/sleepy.webp',
-  victory: '/bag-z/victory.webp',
+  base: '/bag-z-hq/base.webp',
+  hello: '/bag-z-hq/hello.webp',
+  detective: '/bag-z-hq/detective.webp',
+  wallet: '/bag-z-hq/wallet.webp',
+  loot: '/bag-z-hq/loot.webp',
+  security: '/bag-z-hq/security.webp',
+  warning: '/bag-z-hq/warning.webp',
+  confused: '/bag-z-hq/confused.webp',
+  sleepy: '/bag-z-hq/sleepy.webp',
+  victory: '/bag-z-hq/victory.webp',
 }
 
 export function BagZMascot({
