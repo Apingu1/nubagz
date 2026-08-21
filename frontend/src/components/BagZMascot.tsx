@@ -1,5 +1,4 @@
 import { useLocation } from 'react-router-dom'
-import { bagZHqSources, bagZSources } from '../generated/bag-z-assets'
 
 export type BagZVariant =
   | 'base'
@@ -13,13 +12,25 @@ export type BagZVariant =
   | 'sleepy'
   | 'victory'
 
+const premiumBagZSources: Record<BagZVariant, string> = {
+  base: '/bag-z-premium/base.webp',
+  hello: '/bag-z-premium/hello.webp',
+  detective: '/bag-z-premium/detective.webp',
+  wallet: '/bag-z-premium/wallet.webp',
+  loot: '/bag-z-premium/loot.webp',
+  security: '/bag-z-premium/security.webp',
+  warning: '/bag-z-premium/warning.webp',
+  confused: '/bag-z-premium/confused.webp',
+  sleepy: '/bag-z-premium/sleepy.webp',
+  victory: '/bag-z-premium/victory.webp',
+}
+
 export function BagZMascot({
   variant,
   className = '',
   label = 'Bag Z',
   decorative = true,
   eager = false,
-  preferHighResolution = false,
 }: {
   variant: BagZVariant
   className?: string
@@ -29,13 +40,7 @@ export function BagZMascot({
   preferHighResolution?: boolean
 }) {
   const fallbackSource = `/bag-z/${variant}.webp`
-
-  // Keep the requested character variant visible. If that exact variant has a
-  // genuine HQ master, use it. Otherwise use the existing contextual artwork
-  // rather than silently substituting the canonical base character.
-  const source = preferHighResolution
-    ? (bagZHqSources[variant] ?? bagZSources[variant])
-    : bagZSources[variant]
+  const source = premiumBagZSources[variant]
 
   return (
     <img
