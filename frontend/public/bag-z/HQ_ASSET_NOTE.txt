@@ -1,1 +1,0 @@
-Bag Z site artwork is authored from 1254x1254 transparent source masters. Web delivery variants should not be generated from the previous 256px/384px compressed sprites, as those become visibly soft in the large character-led layouts.
