@@ -29,8 +29,12 @@ export function BagZMascot({
   preferHighResolution?: boolean
 }) {
   const fallbackSource = `/bag-z/${variant}.webp`
+
+  // Keep the requested character variant visible. If that exact variant has a
+  // genuine HQ master, use it. Otherwise use the existing contextual artwork
+  // rather than silently substituting the canonical base character.
   const source = preferHighResolution
-    ? (bagZHqSources[variant] ?? bagZHqSources.base)
+    ? (bagZHqSources[variant] ?? bagZSources[variant])
     : bagZSources[variant]
 
   return (
@@ -58,17 +62,111 @@ type RouteFeature = {
 }
 
 function featureForPath(pathname: string): RouteFeature {
-  if (pathname === '/app') return {variant:'hello',kicker:'BAG Z / HOME BASE',title:'Bag Z is on the hunt.',copy:'Your next funded opportunity, reward and reputation gain starts here.'}
-  if (/^\/app\/(for-you|trending|discover|watchbag|onchain)/.test(pathname)) return {variant:'detective',kicker:'BAG Z / SCOUT MODE',title:'Hunting the next Bag.',copy:'Scan funded opportunities, signals and onchain activity without chasing noise.'}
-  if (/^\/app\/(bag|swaps)/.test(pathname)) return {variant:'wallet',kicker:'BAG Z / WALLET MODE',title:'Keep your Bag close.',copy:'Manage rewards and onchain actions with the destination you choose.'}
-  if (/^\/app\/(daily|drops|earnings|revenue-share)/.test(pathname)) return {variant:'loot',kicker:'BAG Z / EARN MODE',title:'Bag it. Then bag some more.',copy:'Track what you have earned and where the next funded reward is coming from.'}
-  if (/^\/app\/(trust|account-trust|reports|reviews)/.test(pathname)) return {variant:'security',kicker:'BAG Z / TRUST MODE',title:'Trust first. Bag second.',copy:'Use reputation, reviews and project signals before you spend your time.'}
-  if (/^\/app\/(gas|admin)/.test(pathname)) return {variant:'warning',kicker:'BAG Z / ALERT MODE',title:'Stay sharp.',copy:'Important controls and cost signals deserve a closer look before you move.'}
-  if (/^\/app\/activity/.test(pathname)) return {variant:'confused',kicker:'BAG Z / TRACE MODE',title:'Follow the trail.',copy:'Every real action leaves a record. Bag Z is reading the story behind yours.'}
-  if (/^\/app\/(leaderboard|referrals|bounties|builders)/.test(pathname)) return {variant:'victory',kicker:'BAG Z / WIN MODE',title:'Stack the wins.',copy:'Build reputation, bring value and keep moving up the Bag economy.'}
-  if (/^\/app\/notifications/.test(pathname)) return {variant:'sleepy',kicker:'BAG Z / SIGNAL MODE',title:'All signal. No panic.',copy:'Your private account events stay here until there is something worth seeing.'}
-  if (/^\/app\/(studio|project-analytics|templates)/.test(pathname)) return {variant:'hello',kicker:'BAG Z / BUILDER MODE',title:'Build a Bag people want.',copy:'Turn project inventory into funded participation that earns real attention.'}
-  return {variant:'base',kicker:'BAG Z / NUBAGZ',title:'Find it. Earn it. Bag it.',copy:'Bag Z keeps the character of NuBagz front and centre while you explore.'}
+  if (pathname === '/app') {
+    return {
+      variant: 'hello',
+      kicker: 'BAG Z / HOME BASE',
+      title: 'Bag Z is on the hunt.',
+      copy: 'Your next funded opportunity, reward and reputation gain starts here.',
+    }
+  }
+
+  if (/^\/app\/(for-you|trending|discover|watchbag|onchain|bagz\/)/.test(pathname)) {
+    return {
+      variant: 'detective',
+      kicker: 'BAG Z / SCOUT MODE',
+      title: 'Hunting the next Bag.',
+      copy: 'Scan funded opportunities, project signals and onchain activity without chasing noise.',
+    }
+  }
+
+  if (pathname === '/app/bag') {
+    return {
+      variant: 'loot',
+      kicker: 'BAG Z / MY BAG',
+      title: 'This one is yours.',
+      copy: 'Track the rewards, balances and progress you have actually bagged across NuBagz.',
+    }
+  }
+
+  if (pathname === '/app/swaps') {
+    return {
+      variant: 'wallet',
+      kicker: 'BAG Z / WALLET MODE',
+      title: 'Move your Bag with intent.',
+      copy: 'Keep wallet actions clear, deliberate and connected to the destination you choose.',
+    }
+  }
+
+  if (/^\/app\/(daily|drops|earnings|revenue-share)/.test(pathname)) {
+    return {
+      variant: 'loot',
+      kicker: 'BAG Z / EARN MODE',
+      title: 'Bag it. Then bag some more.',
+      copy: 'Track what you have earned and where the next funded reward is coming from.',
+    }
+  }
+
+  if (/^\/app\/(trust|account-trust|reports|reviews)/.test(pathname)) {
+    return {
+      variant: 'security',
+      kicker: 'BAG Z / TRUST MODE',
+      title: 'Trust first. Bag second.',
+      copy: 'Use reputation, reviews and project signals before you spend your time.',
+    }
+  }
+
+  if (/^\/app\/(gas|admin)/.test(pathname)) {
+    return {
+      variant: 'warning',
+      kicker: 'BAG Z / ALERT MODE',
+      title: 'Stay sharp.',
+      copy: 'Important controls, costs and risk signals deserve a closer look before you move.',
+    }
+  }
+
+  if (/^\/app\/activity/.test(pathname)) {
+    return {
+      variant: 'confused',
+      kicker: 'BAG Z / TRACE MODE',
+      title: 'Follow the trail.',
+      copy: 'Every real action leaves a record. Bag Z is reading the story behind yours.',
+    }
+  }
+
+  if (/^\/app\/(leaderboard|referrals|bounties|builders)/.test(pathname)) {
+    return {
+      variant: 'victory',
+      kicker: 'BAG Z / WIN MODE',
+      title: 'Stack the wins.',
+      copy: 'Build reputation, bring value and keep moving up the Bag economy.',
+    }
+  }
+
+  if (/^\/app\/notifications/.test(pathname)) {
+    return {
+      variant: 'sleepy',
+      kicker: 'BAG Z / SIGNAL MODE',
+      title: 'All signal. No panic.',
+      copy: 'Your private account events stay here until there is something worth seeing.',
+    }
+  }
+
+  if (/^\/app\/(studio|project-analytics|templates)/.test(pathname)) {
+    return {
+      variant: 'hello',
+      kicker: 'BAG Z / BUILDER MODE',
+      title: 'Build a Bag people want.',
+      copy: 'Turn project inventory into funded participation that earns real attention.',
+    }
+  }
+
+  return {
+    variant: 'base',
+    kicker: 'BAG Z / NUBAGZ',
+    title: 'Find it. Earn it. Bag it.',
+    copy: 'Bag Z keeps the character of NuBagz front and centre while you explore.',
+  }
 }
 
 export function BagZRouteFeature() {
