@@ -4,8 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --host 0.0.0.0",
-    "build": "tsc -b && vite build",
+    "prepare:bag-z": "node scripts/prepare-bag-z.mjs",
+    "dev": "npm run prepare:bag-z && vite --host 0.0.0.0",
+    "build": "npm run prepare:bag-z && tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0"
   },
   "dependencies": {
