@@ -4,7 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "predev": "node scripts/build-bagz-assets.mjs",
     "dev": "vite --host 0.0.0.0",
+    "prebuild": "node scripts/build-bagz-assets.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 0.0.0.0"
   },
@@ -16,7 +18,8 @@
     "react": "latest",
     "react-dom": "latest",
     "react-router-dom": "latest",
-    "lucide-react": "latest"
+    "lucide-react": "latest",
+    "sharp": "^0.34.3"
   },
   "devDependencies": {
     "@types/react": "latest",
