@@ -6,7 +6,7 @@ import { privyConfigured } from '../context/WalletProvider'
 
 const REFERRAL_KEY='nubagz_social_referral'
 
-type Provider='google'|'twitter'|'tiktok'
+type Provider='google'|'twitter'
 
 function PrivySocialButtons({mode,referral,onError}:{mode:'login'|'register';referral?:string;onError:(message:string)=>void}){
   const {socialLogin}=useAuth();const nav=useNavigate();const [active,setActive]=useState<Provider|null>(null)
@@ -25,11 +25,10 @@ function PrivySocialButtons({mode,referral,onError}:{mode:'login'|'register';ref
   })
   const start=(provider:Provider)=>{onError('');setActive(provider);if(mode==='register'&&referral?.trim())sessionStorage.setItem(REFERRAL_KEY,referral.trim());else sessionStorage.removeItem(REFERRAL_KEY);void initOAuth({provider})}
   const busy=state.status==='loading'
-  return <div className="social-auth"><div className="social-auth-label"><span>or continue with</span></div><div className="social-auth-grid">
-    <button type="button" className="social-auth-btn" disabled={busy} onClick={()=>start('google')}><span className="provider-mark google">G</span>{active==='google'&&busy?'Connecting…':'Google'}</button>
+  return <div className="social-auth"><div className="social-auth-label"><span>or continue with</span></div><div className="social-auth-grid social-auth-grid-two">
     <button type="button" className="social-auth-btn" disabled={busy} onClick={()=>start('twitter')}><span className="provider-mark x">𝕏</span>{active==='twitter'&&busy?'Connecting…':'X'}</button>
-    <button type="button" className="social-auth-btn" disabled={busy} onClick={()=>start('tiktok')}><span className="provider-mark tiktok">♪</span>{active==='tiktok'&&busy?'Connecting…':'TikTok'}</button>
-  </div><small className="social-auth-note">One NuBagz account can link your social identities and wallet setup.</small></div>
+    <button type="button" className="social-auth-btn" disabled={busy} onClick={()=>start('google')}><span className="provider-mark google">G</span>{active==='google'&&busy?'Connecting…':'Google'}</button>
+  </div><small className="social-auth-note">Link X once and NuBagz can use that verified identity for supported X Bag Work.</small></div>
 }
 
 export default function SocialLoginButtons(props:{mode:'login'|'register';referral?:string;onError:(message:string)=>void}){
