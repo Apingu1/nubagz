@@ -1,6 +1,4 @@
-/* Phase 1 contextual Bag Z theming.
-   The character changes by page type and the surrounding stage reinforces the mode
-   without changing the approved layout. */
+/* Contextual theming for the final premium Bag Z renders. */
 
 .bag-z-route-hello{
   background:
@@ -74,7 +72,3 @@
     linear-gradient(145deg,#111b14,#0d0b16);
 }
 .bag-z-route-victory .bag-z-orbit.two{border-color:rgba(255,205,72,.22)}
-
-/* Existing lower-resolution contextual art is a Phase 1 fallback until its
-   matching genuine HQ master is added. Keep browser interpolation smooth. */
-.bag-z-mascot{image-rendering:auto}

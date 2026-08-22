@@ -37,24 +37,15 @@ export function BagZMascot({
   label?: string
   decorative?: boolean
   eager?: boolean
-  preferHighResolution?: boolean
 }) {
-  const fallbackSource = `/bag-z/${variant}.webp`
-  const source = premiumBagZSources[variant]
-
   return (
     <img
       className={`bag-z-mascot ${className}`.trim()}
-      src={source}
+      src={premiumBagZSources[variant]}
       alt={decorative ? '' : label}
       aria-hidden={decorative ? true : undefined}
       loading={eager ? 'eager' : 'lazy'}
       decoding="async"
-      onError={(event) => {
-        if (!event.currentTarget.src.endsWith(fallbackSource)) {
-          event.currentTarget.src = fallbackSource
-        }
-      }}
     />
   )
 }
@@ -188,7 +179,7 @@ export function BagZRouteFeature() {
       <div className="bag-z-route-stage" aria-hidden="true">
         <i className="bag-z-orbit one" />
         <i className="bag-z-orbit two" />
-        <BagZMascot variant={feature.variant} className="bag-z-route-art" eager preferHighResolution />
+        <BagZMascot variant={feature.variant} className="bag-z-route-art" eager />
       </div>
     </section>
   )
