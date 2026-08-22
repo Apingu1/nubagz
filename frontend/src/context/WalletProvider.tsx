@@ -4,7 +4,7 @@ import { useAuth } from './AuthContext'
 
 export const privyConfigured = Boolean(import.meta.env.VITE_PRIVY_APP_ID)
 
-function PrivyAuthSync(){
+export function PrivyCustomJwtSync(){
   const {user,loading}=useAuth()
   useSubscribeToJwtAuthWithFlag({
     isAuthenticated:Boolean(user),
@@ -21,6 +21,7 @@ export function WalletProvider({children}:{children:ReactNode}){
     appId={appId}
     clientId={import.meta.env.VITE_PRIVY_CLIENT_ID || undefined}
     config={{
+      loginMethods:['google','twitter','tiktok'],
       appearance:{
         theme:'dark',
         accentColor:'#8B5CF6',
@@ -29,5 +30,5 @@ export function WalletProvider({children}:{children:ReactNode}){
       },
       embeddedWallets:{ethereum:{createOnLogin:'off'}},
     }}
-  ><PrivyAuthSync/>{children}</PrivyProvider>
+  >{children}</PrivyProvider>
 }
