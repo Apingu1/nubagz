@@ -1,127 +1,222 @@
+import hashlib
+import hmac
 import re
+from html.parser import HTMLParser
 from urllib.parse import urlparse
+
 import httpx
 from fastapi import HTTPException
+
 from .challenge_models import Challenge, SocialAccount
 from .config import settings
+
+
+OEMBED_URL = "https://publish.x.com/oembed"
+PROOF_PATTERN = re.compile(r"\bNBZ-[A-F0-9]{12}\b", re.IGNORECASE)
+X_HOSTS = {"x.com", "www.x.com", "mobile.x.com", "twitter.com", "www.twitter.com", "mobile.twitter.com"}
 
 
 class XVerificationUnavailable(Exception):
     pass
 
 
-def _headers() -> dict[str, str]:
-    token = (settings.x_api_bearer_token or "").strip()
-    if not token:
-        raise XVerificationUnavailable("X automatic verification is not configured")
-    return {"Authorization": f"Bearer {token}"}
+class _TweetTextParser(HTMLParser):
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self._inside_p = False
+        self._seen_p = False
+        self.parts: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs):
+        if tag.lower() == "p" and not self._seen_p:
+            self._inside_p = True
+            self._seen_p = True
+
+    def handle_endtag(self, tag: str):
+        if tag.lower() == "p" and self._inside_p:
+            self._inside_p = False
+
+    def handle_data(self, data: str):
+        if self._inside_p:
+            self.parts.append(data)
 
 
-def _tweet_id(challenge: Challenge) -> str:
-    if challenge.target_id and str(challenge.target_id).isdigit():
-        return str(challenge.target_id)
-    match = re.search(r"/status/(\d+)", challenge.target_url or "")
-    if not match:
-        raise HTTPException(400, "This X challenge does not have a valid post URL")
-    return match.group(1)
+def make_x_proof_code(user_id: int, challenge_id: int) -> str:
+    secret = (settings.social_proof_secret or settings.jwt_secret or "change-me-in-production").encode()
+    payload = f"x-proof:{user_id}:{challenge_id}".encode()
+    digest = hmac.new(secret, payload, hashlib.sha256).hexdigest()[:12].upper()
+    return f"NBZ-{digest}"
 
 
-def _target_username(challenge: Challenge) -> str:
-    if challenge.target_id and not str(challenge.target_id).isdigit():
-        return str(challenge.target_id).lstrip("@").strip()
-    raw = (challenge.target_url or "").strip()
-    if raw.startswith("@"):
-        return raw[1:]
+def _parse_public_post_url(post_url: str) -> tuple[str, str]:
+    raw = (post_url or "").strip()
     try:
-        path = urlparse(raw).path.strip("/")
-        if path:
-            return path.split("/")[0].lstrip("@")
+        parsed = urlparse(raw)
+    except ValueError as exc:
+        raise HTTPException(400, "Paste a valid public X post URL") from exc
+    host = (parsed.hostname or "").lower()
+    parts = [part for part in parsed.path.split("/") if part]
+    if parsed.scheme not in {"http", "https"} or host not in X_HOSTS:
+        raise HTTPException(400, "Paste a valid public X post URL")
+    if len(parts) < 3 or parts[1].lower() != "status" or not parts[2].isdigit():
+        raise HTTPException(400, "Paste the URL of your public X post, not an X profile or search page")
+    return parts[0].lstrip("@"), parts[2]
+
+
+def _username_from_author_url(author_url: str) -> str:
+    try:
+        parsed = urlparse(author_url or "")
+        parts = [part for part in parsed.path.split("/") if part]
+        return parts[0].lstrip("@") if parts else ""
     except ValueError:
-        pass
-    return raw.lstrip("@").strip()
+        return ""
 
 
-def _contains_user(client: httpx.Client, url: str, user_id: str, max_pages: int = 12, max_results: int = 100) -> tuple[bool, dict]:
-    pagination_token = None
-    checked = 0
-    for _ in range(max_pages):
-        params: dict[str, str | int] = {"max_results": max_results}
-        if pagination_token:
-            params["pagination_token"] = pagination_token
-        response = client.get(url, params=params, headers=_headers())
-        if response.status_code >= 400:
-            raise XVerificationUnavailable(f"X API returned {response.status_code} while checking this activity")
-        payload = response.json()
-        data = payload.get("data") or []
-        checked += len(data)
-        if any(str(row.get("id")) == str(user_id) for row in data if isinstance(row, dict)):
-            return True, {"source": "X_API", "checked_users": checked}
-        pagination_token = (payload.get("meta") or {}).get("next_token")
-        if not pagination_token:
-            break
-    return False, {"source": "X_API", "checked_users": checked}
+def _tweet_text(markup: str) -> str:
+    parser = _TweetTextParser()
+    parser.feed(markup or "")
+    return " ".join(" ".join(parser.parts).split())
 
 
-def _resolve_x_user_id(client: httpx.Client, account: SocialAccount) -> str:
-    if str(account.provider_user_id).isdigit():
-        return str(account.provider_user_id)
-    if not account.username:
-        raise XVerificationUnavailable("The connected X account does not expose a usable user id")
-    response = client.get(
-        f"{settings.x_api_base_url.rstrip('/')}/users/by/username/{account.username.lstrip('@')}",
-        headers=_headers(),
-    )
-    if response.status_code >= 400:
-        raise XVerificationUnavailable("NuBagz could not resolve the connected X account")
-    user_id = str((response.json().get("data") or {}).get("id") or "")
-    if not user_id:
-        raise XVerificationUnavailable("NuBagz could not resolve the connected X account")
-    return user_id
-
-
-def _resolve_target_user_id(client: httpx.Client, challenge: Challenge) -> str:
-    if challenge.target_id and str(challenge.target_id).isdigit():
-        return str(challenge.target_id)
-    username = _target_username(challenge)
-    if not username:
-        raise HTTPException(400, "This follow challenge does not have a valid X account target")
-    response = client.get(
-        f"{settings.x_api_base_url.rstrip('/')}/users/by/username/{username}",
-        headers=_headers(),
-    )
-    if response.status_code >= 400:
-        raise XVerificationUnavailable("NuBagz could not resolve the target X account")
-    target_id = str((response.json().get("data") or {}).get("id") or "")
-    if not target_id:
-        raise XVerificationUnavailable("NuBagz could not resolve the target X account")
-    return target_id
-
-
-def verify_x_action(account: SocialAccount, challenge: Challenge) -> tuple[bool, dict]:
-    """Verify supported public X actions using the official X API.
-
-    NuBagz intentionally uses the app's server-side bearer token rather than
-    trusting anything supplied by the browser. Protected/private activity may
-    not be visible to the app and is reported as unverifiable rather than being
-    silently awarded.
-    """
-    action = (challenge.action or "").upper()
-    base = settings.x_api_base_url.rstrip("/")
+def _required_domain(value: str) -> str:
+    raw = (value or "").strip()
+    if not raw:
+        return ""
+    candidate = raw if "://" in raw else f"https://{raw}"
     try:
-        with httpx.Client(timeout=12.0) as client:
-            x_user_id = _resolve_x_user_id(client, account)
-            if action == "REPOST":
-                tweet_id = _tweet_id(challenge)
-                verified, evidence = _contains_user(client, f"{base}/tweets/{tweet_id}/retweeted_by", x_user_id)
-                return verified, {**evidence, "provider": "X", "action": action, "tweet_id": tweet_id, "x_user_id": x_user_id}
-            if action == "LIKE":
-                tweet_id = _tweet_id(challenge)
-                verified, evidence = _contains_user(client, f"{base}/tweets/{tweet_id}/liking_users", x_user_id)
-                return verified, {**evidence, "provider": "X", "action": action, "tweet_id": tweet_id, "x_user_id": x_user_id}
-            if action == "FOLLOW":
-                target_id = _resolve_target_user_id(client, challenge)
-                verified, evidence = _contains_user(client, f"{base}/users/{target_id}/followers", x_user_id, max_results=1000)
-                return verified, {**evidence, "provider": "X", "action": action, "target_user_id": target_id, "x_user_id": x_user_id}
+        host = (urlparse(candidate).hostname or "").lower()
+    except ValueError:
+        return ""
+    return host[4:] if host.startswith("www.") else host
+
+
+def _requirement_matches(challenge: Challenge, text: str, markup: str) -> tuple[bool, str]:
+    config = dict(challenge.config or {})
+    action = (challenge.action or "").upper()
+    folded = text.casefold()
+
+    if action == "POST":
+        required = str(config.get("required_text") or "").strip()
+        return (bool(required) and required.casefold() in folded, required)
+
+    if action == "MENTION":
+        required = str(config.get("required_mention") or "").strip().lstrip("@")
+        pattern = re.compile(rf"(?<![\w])@{re.escape(required)}(?![\w])", re.IGNORECASE) if required else None
+        return (bool(pattern and pattern.search(text)), f"@{required}" if required else "")
+
+    if action == "HASHTAG":
+        required = str(config.get("required_hashtag") or "").strip().lstrip("#")
+        pattern = re.compile(rf"(?<![\w])#{re.escape(required)}(?![\w])", re.IGNORECASE) if required else None
+        return (bool(pattern and pattern.search(text)), f"#{required}" if required else "")
+
+    if action == "LINK":
+        required = str(config.get("required_link") or "").strip()
+        domain = _required_domain(required)
+        haystack = f"{text} {markup}".casefold()
+        return (bool(domain) and domain.casefold() in haystack, required)
+
+    raise HTTPException(400, f"Free X proof verification is not available for action {action or 'UNKNOWN'}")
+
+
+def _verify_with_client(
+    client: httpx.Client,
+    account: SocialAccount,
+    challenge: Challenge,
+    post_url: str,
+    expected_proof: str,
+) -> tuple[bool, dict]:
+    submitted_username, tweet_id = _parse_public_post_url(post_url)
+    linked_username = (account.username or "").strip().lstrip("@")
+    if not linked_username:
+        raise XVerificationUnavailable("Your connected X identity does not expose a username that NuBagz can verify")
+
+    try:
+        response = client.get(
+            OEMBED_URL,
+            params={"url": post_url.strip(), "omit_script": "1", "dnt": "true"},
+        )
     except httpx.HTTPError as exc:
-        raise XVerificationUnavailable("X could not be reached for automatic verification") from exc
-    raise HTTPException(400, f"Automatic X verification is not available for action {action or 'UNKNOWN'}")
+        raise XVerificationUnavailable("X public-post verification could not be reached") from exc
+
+    if 400 <= response.status_code < 500:
+        return False, {"source": "X_OEMBED_PUBLIC", "reason": "post_not_public_or_not_found", "tweet_id": tweet_id}
+    if response.status_code >= 500:
+        raise XVerificationUnavailable(f"X public-post verification returned {response.status_code}")
+
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        raise XVerificationUnavailable("X returned an unreadable public-post response") from exc
+
+    author_username = _username_from_author_url(str(payload.get("author_url") or ""))
+    if not author_username:
+        raise XVerificationUnavailable("X did not return the post author's public identity")
+
+    if author_username.casefold() != linked_username.casefold():
+        return False, {
+            "source": "X_OEMBED_PUBLIC",
+            "reason": "wrong_author",
+            "tweet_id": tweet_id,
+            "author_username": author_username,
+        }
+
+    if submitted_username.casefold() != linked_username.casefold():
+        return False, {
+            "source": "X_OEMBED_PUBLIC",
+            "reason": "url_author_mismatch",
+            "tweet_id": tweet_id,
+            "author_username": author_username,
+        }
+
+    markup = str(payload.get("html") or "")
+    text = _tweet_text(markup)
+    if not text:
+        return False, {"source": "X_OEMBED_PUBLIC", "reason": "post_text_unavailable", "tweet_id": tweet_id}
+
+    proof_codes = {token.upper() for token in PROOF_PATTERN.findall(text)}
+    if expected_proof.upper() not in proof_codes:
+        return False, {"source": "X_OEMBED_PUBLIC", "reason": "proof_code_missing", "tweet_id": tweet_id}
+    if len(proof_codes) != 1:
+        return False, {"source": "X_OEMBED_PUBLIC", "reason": "multiple_proof_codes", "tweet_id": tweet_id}
+
+    matches, requirement = _requirement_matches(challenge, text, markup)
+    if not matches:
+        return False, {
+            "source": "X_OEMBED_PUBLIC",
+            "reason": "challenge_requirement_missing",
+            "tweet_id": tweet_id,
+            "requirement": requirement,
+        }
+
+    canonical_url = str(payload.get("url") or post_url).strip()
+    return True, {
+        "source": "X_OEMBED_PUBLIC",
+        "provider": "X",
+        "action": (challenge.action or "").upper(),
+        "post_url": canonical_url,
+        "tweet_id": tweet_id,
+        "author_username": author_username,
+        "proof_code": expected_proof.upper(),
+        "matched_requirement": requirement,
+        "post_text_sha256": hashlib.sha256(text.encode()).hexdigest(),
+    }
+
+
+def verify_x_post_proof(
+    account: SocialAccount,
+    challenge: Challenge,
+    post_url: str,
+    expected_proof: str,
+    client: httpx.Client | None = None,
+) -> tuple[bool, dict]:
+    """Verify a public X post without the paid X API.
+
+    X's official oEmbed endpoint is public, requires no authentication, and is
+    documented by X as not rate-limited. NuBagz uses it only to validate the
+    public post supplied by the worker; it does not crawl X or inspect private
+    likes/follows.
+    """
+    if client is not None:
+        return _verify_with_client(client, account, challenge, post_url, expected_proof)
+    with httpx.Client(timeout=12.0, follow_redirects=True) as owned_client:
+        return _verify_with_client(owned_client, account, challenge, post_url, expected_proof)

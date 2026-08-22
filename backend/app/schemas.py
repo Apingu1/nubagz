@@ -95,9 +95,32 @@ class ChallengeCreate(BaseModel):
         if self.category not in allowed_categories: raise ValueError("Unsupported Bag Work category")
         if self.category=="SOCIAL":
             if self.provider!="X": raise ValueError("X is the only social challenge provider enabled in this release")
-            if self.action not in {"REPOST","LIKE","FOLLOW"}: raise ValueError("Supported X actions are REPOST, LIKE and FOLLOW")
-            if not self.target_url and not self.target_id: raise ValueError("Social challenges require a target X post or account")
+            requirements={
+                "POST":"required_text",
+                "MENTION":"required_mention",
+                "HASHTAG":"required_hashtag",
+                "LINK":"required_link",
+            }
+            if self.action not in requirements:
+                raise ValueError("Free X proof actions are POST, MENTION, HASHTAG and LINK")
+            key=requirements[self.action]
+            raw=str(self.config.get(key) or "").strip()
+            if not raw:
+                raise ValueError(f"{self.action.title()} X challenges require a public-post requirement")
+            if len(raw)>500:
+                raise ValueError("X public-post requirements must be 500 characters or fewer")
+            if self.action=="MENTION":
+                raw="@"+raw.lstrip("@")
+            elif self.action=="HASHTAG":
+                raw="#"+raw.lstrip("#")
+            elif self.action=="LINK":
+                candidate=raw.lower()
+                if not (candidate.startswith("https://") or candidate.startswith("http://")):
+                    raise ValueError("Link X challenges require a full http:// or https:// URL")
+            self.config={**self.config,key:raw}
             self.verification_type="AUTO"
+            self.target_url=None
+            self.target_id=None
         if self.verification_type not in {"AUTO","SELF_ATTEST","PROJECT_REVIEW","QUIZ"}: raise ValueError("Unsupported verification type")
         if self.verification_type=="QUIZ" and not self.config.get("answer"): raise ValueError("Quiz challenges require a correct answer in config")
         return self
