@@ -51,6 +51,23 @@ else
   ok "Using existing .env file."
 fi
 
+get_env_value() {
+  local key="$1"
+  sed -n "s/^${key}=//p" .env | tail -n 1
+}
+
+VITE_PRIVY_APP_ID_VALUE="$(get_env_value VITE_PRIVY_APP_ID)"
+PRIVY_APP_ID_VALUE="$(get_env_value PRIVY_APP_ID)"
+PRIVY_VERIFICATION_KEY_VALUE="$(get_env_value PRIVY_VERIFICATION_KEY)"
+
+if [[ -z "$VITE_PRIVY_APP_ID_VALUE" ]]; then
+  warn "VITE_PRIVY_APP_ID is blank. X/Google login and Connected Accounts will be hidden until Privy is configured in .env."
+elif [[ -z "$PRIVY_APP_ID_VALUE" || -z "$PRIVY_VERIFICATION_KEY_VALUE" ]]; then
+  warn "Privy frontend is configured, but backend identity verification is incomplete. Set PRIVY_APP_ID and PRIVY_VERIFICATION_KEY in .env before testing social login."
+else
+  ok "Privy social-login environment is configured."
+fi
+
 info "Building and starting NuBagz..."
 docker compose up -d --build --remove-orphans
 
