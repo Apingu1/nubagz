@@ -21,7 +21,7 @@ export function WalletProvider({children}:{children:ReactNode}){
     appId={appId}
     clientId={import.meta.env.VITE_PRIVY_CLIENT_ID || undefined}
     config={{
-      loginMethods:['google','twitter','tiktok'],
+      loginMethods:['twitter','google'],
       appearance:{
         theme:'dark',
         accentColor:'#8B5CF6',
