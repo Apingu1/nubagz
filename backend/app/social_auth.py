@@ -17,7 +17,6 @@ from .utils import unique_referral_code
 PROVIDER_TYPES = {
     "google_oauth": "GOOGLE",
     "twitter_oauth": "X",
-    "tiktok_oauth": "TIKTOK",
 }
 
 
@@ -119,7 +118,7 @@ def _synthetic_email(provider: str, subject: str) -> str:
 def create_social_user(db: Session, accounts: list[dict], referred_by_id: int | None = None) -> User:
     social = normalized_social_accounts(accounts)
     if not social:
-        raise HTTPException(400, "No supported Google, X or TikTok identity was found")
+        raise HTTPException(400, "No supported Google or X identity was found")
     primary = social[0]
     preferred_email = str(primary.get("email") or "").lower().strip()
     if not preferred_email or db.query(User).filter(User.email == preferred_email).first():
