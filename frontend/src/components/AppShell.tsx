@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { Compass, LayoutDashboard, Trophy, BriefcaseBusiness, Shield, LogOut, WalletCards, Zap, BadgePoundSterling, Gift, CalendarDays, RadioTower, ShieldCheck, UserRoundCheck, Network, Hammer, Award, Coins, BrainCircuit, Bell, BarChart3, FileStack, Star, Scale, Activity, Flame, Bookmark, ArrowLeftRight, Fuel, PanelLeftClose, PanelLeftOpen, Menu, X } from 'lucide-react'
+import { Compass, LayoutDashboard, Trophy, BriefcaseBusiness, Shield, LogOut, WalletCards, Zap, BadgePoundSterling, Gift, RadioTower, ShieldCheck, UserRoundCheck, Network, Hammer, Coins, BrainCircuit, Bell, BarChart3, FileStack, Star, Scale, Activity, Flame, Bookmark, ArrowLeftRight, Fuel, PanelLeftClose, PanelLeftOpen, Menu, X, ListChecks } from 'lucide-react'
+import { usePrivy } from '@privy-io/react-auth'
 import { Logo } from './Logo'
 import { BagZRouteFeature } from './BagZMascot'
 import { useAuth } from '../context/AuthContext'
+import { privyConfigured } from '../context/WalletProvider'
+
+function PrivyLogoutButton({finish}:{finish:()=>void}){const {logout}=usePrivy();return <button className="icon-btn" title="Log out" aria-label="Log out" onClick={()=>{void (async()=>{try{await logout()}finally{finish()}})()}}><LogOut size={18}/></button>}
+function LogoutButton({finish}:{finish:()=>void}){return privyConfigured?<PrivyLogoutButton finish={finish}/>:<button className="icon-btn" title="Log out" aria-label="Log out" onClick={finish}><LogOut size={18}/></button>}
 
 export default function AppShell(){
  const {user,logout}=useAuth();const nav=useNavigate();const location=useLocation()
@@ -11,17 +16,17 @@ export default function AppShell(){
  const [mobileOpen,setMobileOpen]=useState(false)
  useEffect(()=>{try{localStorage.setItem('nubagz.sidebar.collapsed',String(collapsed))}catch{}},[collapsed])
  useEffect(()=>{setMobileOpen(false)},[location.pathname])
+ const finishLogout=()=>{logout();nav('/')}
 
  const coreItems=[
   ['/app','Home',LayoutDashboard],
   ['/app/bag','My Bag',WalletCards],
-  ['/app/daily','Daily Earn',CalendarDays],
+  ['/app/work','Bag Work',ListChecks],
   ['/app/for-you','For You',BrainCircuit],
   ['/app/discover','Discover',Compass],
   ['/app/trending','Trending',Flame],
   ['/app/watchbag','WatchBag',Bookmark],
   ['/app/drops','BagDrops',Gift],
-  ['/app/bounties','Bounties',Award],
   ['/app/swaps','Swaps',ArrowLeftRight],
   ['/app/earnings','Earnings',BadgePoundSterling],
  ] as const
@@ -57,7 +62,7 @@ export default function AppShell(){
     <div className="nav-section"><span className="nav-section-title">ACCOUNT & COMMUNITY</span>{renderItems(accountItems)}</div>
     <div className="nav-section"><span className="nav-section-title">BUILD</span>{renderItems(buildItems)}{user?.role==='CREATOR'&&<><NavLink to="/app/project-analytics" className={linkClass} title={collapsed?'Project Analytics':undefined}><BarChart3 size={18}/><span>Project Analytics</span></NavLink><NavLink to="/app/templates" className={linkClass} title={collapsed?'Templates':undefined}><FileStack size={18}/><span>Templates</span></NavLink></>}{user?.role==='ADMIN'&&<NavLink to="/app/admin" className={linkClass} title={collapsed?'Admin':undefined}><Shield size={18}/><span>Admin</span></NavLink>}</div>
    </nav>
-   <div className="sidebar-bottom"><div className="mini-profile"><div className="avatar">{user?.username?.slice(0,2).toUpperCase()}</div><div className="profile-copy"><strong>{user?.username}</strong><small>BagScore {user?.bag_score}</small></div></div><button className="icon-btn" title="Log out" aria-label="Log out" onClick={()=>{logout();nav('/')}}><LogOut size={18}/></button></div>
+   <div className="sidebar-bottom"><div className="mini-profile"><div className="avatar">{user?.username?.slice(0,2).toUpperCase()}</div><div className="profile-copy"><strong>{user?.username}</strong><small>BagScore {user?.bag_score}</small></div></div><LogoutButton finish={finishLogout}/></div>
   </aside>
   {mobileOpen&&<button className="sidebar-backdrop" aria-label="Close menu" onClick={()=>setMobileOpen(false)}/>} 
   <main className="app-main"><div className="mobile-top"><button className="mobile-menu-btn" aria-label="Open navigation" onClick={()=>setMobileOpen(true)}><Menu size={21}/></button><Logo/><div className="pulse-pill"><Zap size={14}/> {user?.streak_days} day streak</div></div><div className="bag-z-app-feature-wrap"><BagZRouteFeature/></div><Outlet/></main>
