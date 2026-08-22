@@ -1,1 +1,0 @@
-Final bespoke Bag Z dynamic premium masters. Each contextual master is reconstructed from numbered base64 AVIF chunks and must validate at 1254x1254 before the frontend build is allowed to pass.

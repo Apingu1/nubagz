@@ -1,49 +1,17 @@
-# Bag Z master assets
+# Bag Z legacy master archive
 
-This directory stores the canonical high-resolution Bag Z source in source-safe chunks.
+This directory is retained from the original Bag Z art-pack branch as a source/reference archive only.
 
-## Canonical master
+It is **not** the active website delivery source and is no longer read, reconstructed, composited, or transformed by the frontend build.
 
-The approved Bag Z artwork is binary AVIF data. Keeping it as numbered base64 text chunks makes the 1254×1254 source reproducible through GitHub text-file operations without image resampling during the frontend build.
-
-Use:
+The single canonical website implementation is now the authoritative bespoke premium AVIF set committed directly under:
 
 ```text
-<variant>.01.part
-<variant>.02.part
-<variant>.03.part
-...
+frontend/public/bag-z-premium/
 ```
 
-The canonical `base` master is mandatory. The build concatenates its chunks in numeric order, base64-decodes the result, validates the AVIF container and enforces a minimum 1254×1254 resolution before publishing it to `public/bag-z-hq/base.avif`.
+Active variants are `base`, `hello`, `detective`, `wallet`, `loot`, `security`, `warning`, `confused`, `sleepy`, and `victory`.
 
-## Phase 2 contextual masters
+`npm run prepare:bag-z` now validates those committed AVIF binaries against the final handoff SHA-256 hashes and requires exact 1254×1254 dimensions. It does not generate artwork.
 
-The site supports `base`, `hello`, `detective`, `wallet`, `loot`, `security`, `warning`, `confused`, `sleepy`, and `victory`.
-
-To keep every large Bag Z composition sharp and character-consistent without ever enlarging the old thumbnail WebPs, `scripts/prepare-bag-z.mjs` now builds contextual HQ compositions from the genuine canonical master. Each generated 1254×1254 SVG embeds the full-resolution AVIF character and adds crisp mode-specific vector artwork:
-
-- `hello` — welcome/wave energy
-- `detective` — magnifying glass and scanner treatment
-- `wallet` — wallet/card treatment
-- `loot` — reward bag and coin treatment
-- `security` — trust shield/check treatment
-- `warning` — alert/warning treatment
-- `confused` — question/empty-state treatment
-- `sleepy` — idle/night treatment
-- `victory` — trophy/confetti treatment
-
-This makes the contextual masters resolution-independent at display time while preserving the exact approved Bag Z face, proportions, markings, cross-body bag and Z gem.
-
-If a genuine standalone 1254×1254 contextual AVIF is added later as numbered chunks, it automatically takes priority over the generated vector composition for that variant.
-
-## Build behaviour
-
-- `base` is mandatory and build-failing if invalid.
-- Genuine contextual AVIF chunks are validated at the same 1254px floor when present.
-- Missing contextual rasters are generated as HQ SVG compositions from the canonical master.
-- The generated TypeScript asset map points all ten variants at HQ assets, so large heroes and smaller mascot states no longer need to stretch the low-resolution WebPs.
-- `public/bag-z/*.webp` remains only as a defensive runtime fallback.
-- Generated delivery assets are recreated by `npm run prepare:bag-z` / `npm run build` and are intentionally not hand-maintained.
-
-Do not create an "HQ" variant by resizing a low-resolution WebP.
+The small files under `frontend/public/bag-z/*.webp` are retained only as emergency runtime fallbacks. They are never the primary premium hero artwork.

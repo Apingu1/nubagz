@@ -16,10 +16,6 @@ node_modules/
 dist/
 .vite/
 
-# generated Bag Z delivery assets
-frontend/public/bag-z-hq/
-frontend/src/generated/bag-z-assets.ts
-
 # OS/editor
 .DS_Store
 .vscode/
