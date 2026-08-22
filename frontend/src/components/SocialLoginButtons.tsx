@@ -21,7 +21,7 @@ function PrivySocialButtons({mode,referral,onError}:{mode:'login'|'register';ref
         nav('/app')
       }catch(e:any){onError(e?.message||'Social login could not be completed');setActive(null)}
     })()},
-    onError:(error)=>{onError(error?.message||'Social login failed');setActive(null)},
+    onError:(errorCode)=>{onError(`Social login failed (${String(errorCode)}).`);setActive(null)},
   })
   const start=(provider:Provider)=>{onError('');setActive(provider);if(mode==='register'&&referral?.trim())sessionStorage.setItem(REFERRAL_KEY,referral.trim());else sessionStorage.removeItem(REFERRAL_KEY);void initOAuth({provider})}
   const busy=state.status==='loading'
