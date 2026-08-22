@@ -57,7 +57,8 @@ docker compose up -d --build --remove-orphans
 info "Waiting for NuBagz to become ready..."
 READY=0
 for _ in $(seq 1 60); do
-  if curl -fsS --max-time 3 http://localhost:8080 >/dev/null 2>&1; then
+  if curl -fsS --max-time 3 http://127.0.0.1:8080/ >/dev/null 2>&1 \
+     && curl -fsS --max-time 3 http://127.0.0.1:8080/api/health 2>/dev/null | grep -q '"status":"ok"'; then
     READY=1
     break
   fi
@@ -68,7 +69,7 @@ printf '\n'
 docker compose ps
 
 if [[ "$READY" -ne 1 ]]; then
-  warn "NuBagz did not answer on port 8080 within the startup window."
+  warn "NuBagz did not become ready on port 8080 within the startup window."
   printf '\n--- API LOGS ---\n'
   docker compose logs --tail=120 api || true
   printf '\n--- WEB LOGS ---\n'
@@ -84,7 +85,7 @@ printf '\nOpen: http://localhost:8080\n'
 if [[ -n "${CODESPACE_NAME:-}" ]]; then
   DOMAIN="${GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN:-app.github.dev}"
   printf 'Codespaces: https://%s-8080.%s\n' "$CODESPACE_NAME" "$DOMAIN"
-  printf 'If needed, open the Codespaces Ports tab and set port 8080 visibility appropriately.\n'
+  printf 'Use port 8080 in the Codespaces Ports tab.\n'
 fi
 
 printf '\nUseful commands:\n'

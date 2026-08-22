@@ -1,0 +1,74 @@
+/* Contextual theming for the final premium Bag Z renders. */
+
+.bag-z-route-hello{
+  background:
+    radial-gradient(circle at 80% 44%,rgba(183,255,56,.17),transparent 31%),
+    radial-gradient(circle at 18% 20%,rgba(140,92,255,.08),transparent 30%),
+    linear-gradient(145deg,#13101f,#0d0b16);
+}
+
+.bag-z-route-detective{
+  background:
+    radial-gradient(circle at 80% 44%,rgba(73,210,255,.14),transparent 31%),
+    radial-gradient(circle at 15% 18%,rgba(69,112,255,.07),transparent 30%),
+    linear-gradient(145deg,#101720,#0d0b16);
+}
+.bag-z-route-detective .bag-z-orbit{border-color:rgba(73,210,255,.22)}
+.bag-z-route-detective .bag-z-route-copy>span{color:#78dcff}
+
+.bag-z-route-wallet{
+  background:
+    radial-gradient(circle at 80% 44%,rgba(79,142,255,.15),transparent 31%),
+    radial-gradient(circle at 20% 18%,rgba(183,255,56,.05),transparent 28%),
+    linear-gradient(145deg,#101522,#0d0b16);
+}
+.bag-z-route-wallet .bag-z-orbit{border-color:rgba(90,155,255,.22)}
+.bag-z-route-wallet .bag-z-route-copy>span{color:#8db8ff}
+
+.bag-z-route-loot{
+  background:
+    radial-gradient(circle at 80% 44%,rgba(183,255,56,.19),transparent 31%),
+    radial-gradient(circle at 17% 18%,rgba(255,199,76,.07),transparent 28%),
+    linear-gradient(145deg,#131a11,#0d0b16);
+}
+.bag-z-route-loot .bag-z-orbit.two{border-color:rgba(255,199,76,.20)}
+
+.bag-z-route-security{
+  background:
+    radial-gradient(circle at 80% 44%,rgba(85,232,255,.12),transparent 31%),
+    linear-gradient(145deg,#10151b,#0d0b16);
+}
+.bag-z-route-security .bag-z-orbit{border-color:rgba(85,232,255,.20)}
+.bag-z-route-security .bag-z-route-copy>span{color:#76e5f8}
+
+.bag-z-route-warning{
+  background:
+    radial-gradient(circle at 80% 44%,rgba(255,213,90,.14),transparent 31%),
+    linear-gradient(145deg,#17131d,#0d0b16);
+}
+.bag-z-route-warning .bag-z-orbit{border-color:rgba(255,213,90,.20)}
+.bag-z-route-warning .bag-z-route-copy>span{color:#ffd55a}
+
+.bag-z-route-confused{
+  background:
+    radial-gradient(circle at 80% 44%,rgba(171,111,255,.15),transparent 31%),
+    linear-gradient(145deg,#171221,#0d0b16);
+}
+.bag-z-route-confused .bag-z-orbit{border-color:rgba(171,111,255,.21)}
+.bag-z-route-confused .bag-z-route-copy>span{color:#c49aff}
+
+.bag-z-route-sleepy{
+  background:
+    radial-gradient(circle at 80% 44%,rgba(109,121,255,.12),transparent 31%),
+    linear-gradient(145deg,#10111d,#0d0b16);
+}
+.bag-z-route-sleepy .bag-z-orbit{border-color:rgba(120,132,255,.18)}
+.bag-z-route-sleepy .bag-z-route-copy>span{color:#aab1ff}
+
+.bag-z-route-victory{
+  background:
+    radial-gradient(circle at 80% 44%,rgba(183,255,56,.21),transparent 32%),
+    radial-gradient(circle at 18% 18%,rgba(255,205,72,.08),transparent 28%),
+    linear-gradient(145deg,#111b14,#0d0b16);
+}
+.bag-z-route-victory .bag-z-orbit.two{border-color:rgba(255,205,72,.22)}

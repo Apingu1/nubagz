@@ -36,7 +36,80 @@ jobs:
           node-version: '22'
       - run: npm install
       - run: npm run build
-      - name: Verify canonical Bag Z delivery asset
-        run: test -s dist/bag-z-hq/base.avif
+      - name: Verify authoritative premium Bag Z delivery pack
+        run: node scripts/prepare-bag-z.mjs dist/bag-z-premium
       - name: Build production frontend container
         run: docker build -t nubagz-frontend-ci .
+
+  runtime-smoke:
+    name: production runtime smoke test
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and start the real production stack
+        run: docker compose up -d --build --remove-orphans
+
+      - name: Wait for web root and API
+        shell: bash
+        run: |
+          set -euo pipefail
+          root_code="000"
+          health_code="000"
+
+          for _ in $(seq 1 60); do
+            root_code="$(curl -sS -o /tmp/nubagz-root.html -w '%{http_code}' http://127.0.0.1:8080/ || true)"
+            health_code="$(curl -sS -o /tmp/nubagz-health.json -w '%{http_code}' http://127.0.0.1:8080/api/health || true)"
+            if [[ "$root_code" == "200" && "$health_code" == "200" ]]; then
+              break
+            fi
+            sleep 2
+          done
+
+          test "$root_code" = "200"
+          test "$health_code" = "200"
+          grep -q '<title>NuBagz' /tmp/nubagz-root.html
+          grep -q '"status":"ok"' /tmp/nubagz-health.json
+
+      - name: Verify SPA routes and exact premium mascot assets
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for route in / /login /register /discover /my-bag /project-trust; do
+            code="$(curl -sS -o /tmp/spa-route.html -w '%{http_code}' "http://127.0.0.1:8080${route}")"
+            echo "${route} -> ${code}"
+            test "$code" = "200"
+            grep -q '<title>NuBagz' /tmp/spa-route.html
+          done
+
+          declare -A expected=(
+            [base]=7b3ead2c8693fee55e4ed1321b026ce361f2da460dfee7afc6a048cedf3a979d
+            [hello]=bc973909a7a88b17cc248c6586674720864f0323d6a5745eb029217375ed59e1
+            [detective]=57c53de5bf3f064f6e8bc1b1db3c0222f4de259094aa13887d0e0c97469976b6
+            [wallet]=47b98f02e0c0a5598bce91a92b20104216ddc8ac83d1120a883367f279e79979
+            [loot]=34aee69704955aeb0932e1b61befd047371d3219fdaa0ce58905a1924d87d993
+            [security]=fa24ac97d0e31bf96f683d8d3903a0a4e0a3db30c4471859efe6831c5bbc2700
+            [warning]=33d5faa6ab2a1e310a54453f170a30b990511a17f6134118b9fdf411f855f818
+            [confused]=785629cec729864746d05c7bab908fe9c115cf51171c5b8242c1df80ae512216
+            [sleepy]=27bae69bcc081601e487c07ea6a502ddade41b106382028f4285fa5eb5160c95
+            [victory]=c951fbc5385b1997efb39b6ef0593ce5e481f9c693501d301233dd91bb490161
+          )
+
+          for variant in base hello detective wallet loot security warning confused sleepy victory; do
+            file="/tmp/${variant}.avif"
+            code="$(curl -sS -o "$file" -w '%{http_code}' "http://127.0.0.1:8080/bag-z-premium/${variant}.avif")"
+            echo "Bag Z ${variant} -> ${code}"
+            test "$code" = "200"
+            actual="$(sha256sum "$file" | awk '{print $1}')"
+            test "$actual" = "${expected[$variant]}"
+          done
+
+      - name: Print production logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=250
+
+      - name: Stop production stack
+        if: always()
+        run: docker compose down -v --remove-orphans
