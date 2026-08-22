@@ -21,6 +21,31 @@ const expected = {
   victory: 'c951fbc5385b1997efb39b6ef0593ce5e481f9c693501d301233dd91bb490161',
 }
 
+const forbiddenLegacyPaths = [
+  'bag-z-master',
+  'bag-z-masters',
+  'bag-z-final-masters',
+  'bag-z-premium-final',
+  'bag-z-premium-hd',
+  'bag-z-premium-masters',
+  'bag-z-premium-v2',
+  'public/bag-z',
+  'public/bag-z-hq',
+  'src/generated/bag-z-assets.ts',
+]
+
+async function assertLegacyPathsAbsent() {
+  for (const legacyPath of forbiddenLegacyPaths) {
+    try {
+      await stat(path.resolve(frontendRoot, legacyPath))
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') continue
+      throw error
+    }
+    throw new Error(`Obsolete Bag Z path must not exist: ${legacyPath}`)
+  }
+}
+
 function readAvifDimensions(buffer, variant) {
   if (buffer.length < 32) throw new Error(`${variant}: AVIF is unexpectedly small`)
 
@@ -82,6 +107,8 @@ async function validateVariant(variant, expectedSha256) {
 
   console.log(`Bag Z premium OK: ${variant}.avif — ${width}x${height}, ${buffer.length} bytes, sha256 ${sha256}`)
 }
+
+await assertLegacyPathsAbsent()
 
 const entries = await readdir(assetDir)
 const rejectedPremiumWebps = entries.filter((entry) => entry.toLowerCase().endsWith('.webp'))
