@@ -10,7 +10,7 @@ from ..challenge_models import Challenge
 from ..economy_models import OnchainRule, OnchainProof, CampaignAccessRule, CampaignFunding
 from ..marketplace_models import BagBuilderPathway, BagBuilderAttribution
 from ..engagement_models import ReferralConversion
-from ..schemas import CampaignCreate, CampaignOut, MissionCompleteIn
+from ..schemas import CampaignCreate, CampaignOut, ChallengeOut, MissionCompleteIn
 from ..economy import campaign_distributed_total
 from .risk import evaluate_user
 
@@ -42,7 +42,7 @@ def serialize_campaign(c: Campaign, db: Session) -> CampaignOut:
             "status": row.status,
             "created_at": row.created_at,
         }
-        payload.challenges.append(public)
+        payload.challenges.append(ChallengeOut.model_validate(public))
     return payload
 
 
