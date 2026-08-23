@@ -50,7 +50,11 @@ def moderate_project(project_id: int, data: AdminDecision, db: Session = Depends
 @router.get("/campaigns")
 def campaigns(db: Session = Depends(get_db), _: User = Depends(require_admin)):
     rows = db.query(Campaign).order_by(Campaign.created_at.desc()).all(); funding_rows = {f.campaign_id:f for f in db.query(CampaignFunding).all()}
-    return [{"id":c.id,"title":c.title,"project_id":c.project_id,"asset":c.reward_asset,"allocation":str(c.token_allocation),"status":c.status,"featured":c.featured,"funding_status":funding_rows[c.id].status if c.id in funding_rows else "UNFUNDED","created_at":c.created_at.isoformat()} for c in rows]
+    payload=[]
+    for c in rows:
+        funding=funding_rows.get(c.id); required=Decimal(c.gross_reward_per_user)*Decimal(c.max_users)
+        payload.append({"id":c.id,"title":c.title,"project_id":c.project_id,"asset":c.reward_asset,"allocation":str(c.token_allocation),"required_amount":str(required),"status":c.status,"featured":c.featured,"funding_status":funding.status if funding else "UNFUNDED","declared_amount":str(funding.declared_amount if funding else 0),"verified_amount":str(funding.verified_amount if funding else 0),"funding_tx_hash":funding.tx_hash if funding else None,"created_at":c.created_at.isoformat()})
+    return payload
 
 
 @router.patch("/campaigns/{campaign_id}")
