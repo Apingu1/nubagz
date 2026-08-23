@@ -8,7 +8,6 @@ from ..deps import get_current_user
 from ..models import User, Project, Campaign, Mission, Enrollment, MissionCompletion, LedgerEntry
 from ..challenge_models import Challenge
 from ..economy_models import OnchainRule, OnchainProof, CampaignAccessRule, CampaignFunding
-from ..marketplace_models import BagBuilderPathway, BagBuilderAttribution
 from ..engagement_models import ReferralConversion
 from ..schemas import CampaignCreate, CampaignOut, ChallengeOut, MissionCompleteIn
 from ..economy import campaign_distributed_total
@@ -16,6 +15,7 @@ from .risk import evaluate_user
 
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 REFERRAL_ELIGIBLE_LEVELS = {"NORMAL", "VERIFIED"}
+PUBLIC_PROJECT_STATUSES = {"LIVE", "APPROVED"}
 
 
 def serialize_campaign(c: Campaign, db: Session) -> CampaignOut:
@@ -26,20 +26,12 @@ def serialize_campaign(c: Campaign, db: Session) -> CampaignOut:
     payload.challenges = []
     for row in challenge_rows:
         public = {
-            "id": row.id,
-            "campaign_id": row.campaign_id,
-            "title": row.title,
-            "description": row.description,
-            "category": row.category,
-            "provider": row.provider,
-            "action": row.action,
-            "verification_type": row.verification_type,
-            "target_url": row.target_url,
-            "target_id": row.target_id,
+            "id": row.id, "campaign_id": row.campaign_id, "title": row.title,
+            "description": row.description, "category": row.category, "provider": row.provider,
+            "action": row.action, "verification_type": row.verification_type,
+            "target_url": row.target_url, "target_id": row.target_id,
             "config": {k:v for k,v in (row.config or {}).items() if k != "answer"},
-            "xp_reward": row.xp_reward,
-            "position": row.position,
-            "status": row.status,
+            "xp_reward": row.xp_reward, "position": row.position, "status": row.status,
             "created_at": row.created_at,
         }
         payload.challenges.append(ChallengeOut.model_validate(public))
@@ -51,6 +43,12 @@ def funding_available(db: Session, campaign: Campaign, next_gross: Decimal = Dec
     if not funding: return False
     distributed = campaign_distributed_total(db, campaign.id)
     return Decimal(funding.verified_amount) - distributed >= next_gross
+
+
+def fully_funded(db: Session, campaign: Campaign) -> bool:
+    funding = db.query(CampaignFunding).filter(CampaignFunding.campaign_id == campaign.id).first()
+    required = Decimal(campaign.gross_reward_per_user) * Decimal(campaign.max_users)
+    return bool(funding and funding.status == "VERIFIED" and Decimal(funding.verified_amount) >= required)
 
 
 @router.get("", response_model=list[CampaignOut])
@@ -71,12 +69,39 @@ def my_campaigns(db: Session = Depends(get_db), user: User = Depends(get_current
 def create_campaign(data: CampaignCreate, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     project = db.get(Project, data.project_id)
     if not project or project.owner_id != user.id: raise HTTPException(404, "Project not found")
-    if project.status != "APPROVED": raise HTTPException(400, "Project must be approved before a campaign can be submitted")
-    campaign = Campaign(**data.model_dump(exclude={"missions", "challenges"}), status="PENDING"); db.add(campaign); db.flush()
+    if project.status not in PUBLIC_PROJECT_STATUSES: raise HTTPException(400, "Suspended or archived projects cannot create new Bags")
+    campaign = Campaign(**data.model_dump(exclude={"missions", "challenges"}), status="DRAFT")
+    db.add(campaign); db.flush()
     for idx, mission_data in enumerate(data.missions): db.add(Mission(campaign_id=campaign.id, position=idx, **mission_data.model_dump()))
     for idx, challenge_data in enumerate(data.challenges): db.add(Challenge(campaign_id=campaign.id, position=idx, **challenge_data.model_dump()))
     db.commit(); campaign = db.query(Campaign).options(joinedload(Campaign.project), joinedload(Campaign.missions)).filter(Campaign.id == campaign.id).first()
     return serialize_campaign(campaign, db)
+
+
+@router.post("/{campaign_id}/publish")
+def publish_campaign(campaign_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    campaign = db.get(Campaign, campaign_id)
+    project = db.get(Project, campaign.project_id) if campaign else None
+    if not campaign or not project or project.owner_id != user.id: raise HTTPException(404, "Bag not found")
+    if project.status not in PUBLIC_PROJECT_STATUSES: raise HTTPException(409, "This project is not currently publishable")
+    if campaign.status == "SUSPENDED": raise HTTPException(409, "A suspended Bag must be restored by moderation before it can publish")
+    if not fully_funded(db, campaign):
+        required = Decimal(campaign.gross_reward_per_user) * Decimal(campaign.max_users)
+        raise HTTPException(409, f"Verify at least {required} {campaign.reward_asset} of reward funding before publishing")
+    active_work = db.query(func.count(Challenge.id)).filter(Challenge.campaign_id == campaign.id, Challenge.status == "ACTIVE").scalar() or 0
+    legacy_work = db.query(func.count(Mission.id)).filter(Mission.campaign_id == campaign.id).scalar() or 0
+    if not active_work and not legacy_work: raise HTTPException(409, "Add at least one Bag Work activity before publishing")
+    campaign.status = "LIVE"; db.commit()
+    return {"ok": True, "status": campaign.status}
+
+
+@router.post("/{campaign_id}/pause")
+def pause_campaign(campaign_id: int, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    campaign = db.get(Campaign, campaign_id)
+    project = db.get(Project, campaign.project_id) if campaign else None
+    if not campaign or not project or project.owner_id != user.id: raise HTTPException(404, "Bag not found")
+    if campaign.status == "SUSPENDED": raise HTTPException(409, "Moderation-suspended Bags cannot be changed by the creator")
+    campaign.status = "PAUSED"; db.commit(); return {"ok": True, "status": campaign.status}
 
 
 @router.get("/{campaign_id}", response_model=CampaignOut)
@@ -122,31 +147,10 @@ def complete_mission(campaign_id: int, mission_id: int, data: MissionCompleteIn,
         if not verified: raise HTTPException(400, "That answer is not correct")
     will_complete = enrollment.completed_count + 1 >= len(campaign.missions); gross = Decimal(campaign.gross_reward_per_user)
     if will_complete and not funding_available(db, campaign, gross): raise HTTPException(409, "Reward inventory was exhausted before this Bag could settle. No final completion was recorded.")
-
     referrer_profile = None
     if will_complete and user.referred_by_id:
         referrer = db.get(User, user.referred_by_id)
-        if referrer:
-            referrer_profile = evaluate_user(db, referrer)
-
-    builder_pathway = None
-    builder_profile = None
-    builder_user = None
-    if will_complete:
-        attribution = db.query(BagBuilderAttribution).filter(
-            BagBuilderAttribution.user_id == user.id,
-            BagBuilderAttribution.campaign_id == campaign.id,
-        ).first()
-        if attribution:
-            pathway = db.get(BagBuilderPathway, attribution.pathway_id)
-            if pathway and pathway.status == "APPROVED" and pathway.campaign_id == campaign.id:
-                candidate = db.get(User, pathway.creator_id)
-                project = db.get(Project, campaign.project_id)
-                if candidate and project and candidate.id != project.owner_id:
-                    builder_pathway = pathway
-                    builder_user = candidate
-                    builder_profile = evaluate_user(db, candidate)
-
+        if referrer: referrer_profile = evaluate_user(db, referrer)
     db.add(MissionCompletion(user_id=user.id, mission_id=mission_id, answer=data.answer, verified=verified)); enrollment.completed_count += 1
     user.xp += mission.xp_reward; user.bag_score = min(1000, user.bag_score + max(1, mission.xp_reward // 10)); completed_now = False
     if will_complete:
@@ -154,27 +158,19 @@ def complete_mission(campaign_id: int, mission_id: int, data: MissionCompleteIn,
         user_amount = gross * Decimal(campaign.user_share_pct) / Decimal("100")
         platform_amount = gross * Decimal(campaign.nubagz_share_pct) / Decimal("100")
         referral_amount = gross * Decimal(campaign.referral_share_pct) / Decimal("100")
-        builder_amount = Decimal("0"); builder_id = None
-        if builder_pathway and builder_user and builder_profile and builder_profile.trust_level != "RESTRICTED":
-            builder_amount = gross * Decimal(builder_pathway.creator_share_pct) / Decimal("100")
-            builder_amount = min(builder_amount, platform_amount)
-            builder_id = builder_user.id
-            platform_amount -= builder_amount
         enrollment.earned_amount = user_amount
         db.add(LedgerEntry(user_id=user.id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=user_amount, entry_type="CAMPAIGN_REWARD", note=f"Completed {campaign.title}"))
-        if builder_id and builder_amount > 0:
-            db.add(LedgerEntry(user_id=builder_id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=builder_amount, entry_type="BUILDER_SHARE", note=f"BagBuilder share from {campaign.title}"))
         db.add(LedgerEntry(user_id=None, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=platform_amount, entry_type="PLATFORM_SHARE", note="NuBagz campaign share"))
         if user.referred_by_id and referral_amount > 0:
             referrer_level = referrer_profile.trust_level if referrer_profile else "REVIEW"
             if referrer_level not in REFERRAL_ELIGIBLE_LEVELS:
-                db.add(LedgerEntry(user_id=None, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=referral_amount, entry_type="COMMUNITY_SHARE", note=f"Referral share redirected because referrer trust is {referrer_level}"))
-                db.add(ReferralConversion(referrer_id=user.referred_by_id, referred_user_id=user.id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, allocated_amount=referral_amount, paid_amount=0, status="REDIRECTED", reason=f"Referrer {referrer_level.lower()} at settlement"))
+                db.add(LedgerEntry(user_id=None,campaign_id=campaign.id,asset_symbol=campaign.reward_asset,amount=referral_amount,entry_type="COMMUNITY_SHARE",note=f"Referral share redirected because referrer trust is {referrer_level}"))
+                db.add(ReferralConversion(referrer_id=user.referred_by_id,referred_user_id=user.id,campaign_id=campaign.id,asset_symbol=campaign.reward_asset,allocated_amount=referral_amount,paid_amount=0,status="REDIRECTED",reason=f"Referrer {referrer_level.lower()} at settlement"))
             else:
-                db.add(LedgerEntry(user_id=user.referred_by_id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=referral_amount, entry_type="REFERRAL_SHARE", note=f"Referral reward from {user.username}"))
-                db.add(ReferralConversion(referrer_id=user.referred_by_id, referred_user_id=user.id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, allocated_amount=referral_amount, paid_amount=referral_amount, status="PAID", reason="Funded campaign conversion"))
+                db.add(LedgerEntry(user_id=user.referred_by_id,campaign_id=campaign.id,asset_symbol=campaign.reward_asset,amount=referral_amount,entry_type="REFERRAL_SHARE",note=f"Referral reward from {user.username}"))
+                db.add(ReferralConversion(referrer_id=user.referred_by_id,referred_user_id=user.id,campaign_id=campaign.id,asset_symbol=campaign.reward_asset,allocated_amount=referral_amount,paid_amount=referral_amount,status="PAID",reason="Funded campaign conversion"))
         else:
-            db.add(LedgerEntry(user_id=None, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=referral_amount, entry_type="COMMUNITY_SHARE", note="Unassigned referral share"))
+            db.add(LedgerEntry(user_id=None,campaign_id=campaign.id,asset_symbol=campaign.reward_asset,amount=referral_amount,entry_type="COMMUNITY_SHARE",note="Unassigned referral share"))
         user.bag_score = min(1000, user.bag_score + 20)
     db.commit(); return {"ok": True, "completed": completed_now, "xp": user.xp, "bag_score": user.bag_score}
 
