@@ -73,6 +73,27 @@ class MissionOut(BaseModel):
     id:int; title:str; description:str; mission_type:str; verification_type:str; target_url:str|None; quiz_question:str|None; quiz_options:list[str]|None; xp_reward:int; position:int
     model_config=ConfigDict(from_attributes=True)
 
+class GasSponsorshipCreate(BaseModel):
+    enabled:bool=True
+    chain:str=Field(min_length=2,max_length=32)
+    max_native_per_claim:Decimal=Field(gt=0)
+    max_unique_users:int|None=Field(default=None,gt=0,le=1_000_000)
+    max_claims:int=Field(gt=0,le=1_000_000)
+    max_claims_per_wallet:int=Field(default=1,gt=0,le=100)
+    funded_amount:Decimal=Field(gt=0)
+    funding_reference:str=Field(min_length=4,max_length=255)
+    starts_at:datetime|None=None
+    ends_at:datetime|None=None
+
+    @model_validator(mode="after")
+    def validate_sponsorship(self):
+        if self.ends_at and self.starts_at and self.ends_at <= self.starts_at:
+            raise ValueError("Gas Pass end time must be after its start time")
+        maximum = self.max_native_per_claim * Decimal(self.max_claims)
+        if self.funded_amount < maximum:
+            raise ValueError(f"Gas Pass funding must cover its maximum configured obligation of {maximum}")
+        return self
+
 class ChallengeCreate(BaseModel):
     title:str=Field(min_length=3,max_length=180)
     description:str=""
@@ -84,6 +105,7 @@ class ChallengeCreate(BaseModel):
     target_id:str|None=None
     config:dict[str,Any]=Field(default_factory=dict)
     xp_reward:int=Field(default=50,ge=0,le=100000)
+    gas_sponsorship:GasSponsorshipCreate|None=None
 
     @model_validator(mode="after")
     def validate_challenge(self):
@@ -91,36 +113,26 @@ class ChallengeCreate(BaseModel):
         self.verification_type=self.verification_type.upper()
         if self.provider: self.provider=self.provider.upper()
         if self.action: self.action=self.action.upper()
-        allowed_categories={"SOCIAL","COMMUNITY","CONTENT","ONCHAIN","BAG_WORK","CUSTOM"}
+        allowed_categories={"SOCIAL","COMMUNITY","CONTENT","ONCHAIN","BAG_WORK","LEARN","CUSTOM"}
         if self.category not in allowed_categories: raise ValueError("Unsupported Bag Work category")
         if self.category=="SOCIAL":
             if self.provider!="X": raise ValueError("X is the only social challenge provider enabled in this release")
-            requirements={
-                "POST":"required_text",
-                "MENTION":"required_mention",
-                "HASHTAG":"required_hashtag",
-                "LINK":"required_link",
-            }
-            if self.action not in requirements:
-                raise ValueError("Free X proof actions are POST, MENTION, HASHTAG and LINK")
-            key=requirements[self.action]
-            raw=str(self.config.get(key) or "").strip()
-            if not raw:
-                raise ValueError(f"{self.action.title()} X challenges require a public-post requirement")
-            if len(raw)>500:
-                raise ValueError("X public-post requirements must be 500 characters or fewer")
-            if self.action=="MENTION":
-                raw="@"+raw.lstrip("@")
-            elif self.action=="HASHTAG":
-                raw="#"+raw.lstrip("#")
+            requirements={"POST":"required_text","MENTION":"required_mention","HASHTAG":"required_hashtag","LINK":"required_link"}
+            if self.action not in requirements: raise ValueError("Free X proof actions are POST, MENTION, HASHTAG and LINK")
+            key=requirements[self.action]; raw=str(self.config.get(key) or "").strip()
+            if not raw: raise ValueError(f"{self.action.title()} X challenges require a public-post requirement")
+            if len(raw)>500: raise ValueError("X public-post requirements must be 500 characters or fewer")
+            if self.action=="MENTION": raw="@"+raw.lstrip("@")
+            elif self.action=="HASHTAG": raw="#"+raw.lstrip("#")
             elif self.action=="LINK":
                 candidate=raw.lower()
-                if not (candidate.startswith("https://") or candidate.startswith("http://")):
-                    raise ValueError("Link X challenges require a full http:// or https:// URL")
-            self.config={**self.config,key:raw}
-            self.verification_type="AUTO"
-            self.target_url=None
-            self.target_id=None
+                if not (candidate.startswith("https://") or candidate.startswith("http://")): raise ValueError("Link X challenges require a full http:// or https:// URL")
+            self.config={**self.config,key:raw}; self.verification_type="AUTO"; self.target_url=None; self.target_id=None
+        if self.gas_sponsorship:
+            if self.category != "ONCHAIN": raise ValueError("Gas Pass can only be attached to ONCHAIN Bag Work")
+            target=str(self.config.get("target_address") or self.target_id or "").strip()
+            if not target: raise ValueError("Sponsored on-chain work requires a target contract/address")
+            self.config={**self.config,"target_address":target,"chain":self.gas_sponsorship.chain}
         if self.verification_type not in {"AUTO","SELF_ATTEST","PROJECT_REVIEW","QUIZ"}: raise ValueError("Unsupported verification type")
         if self.verification_type=="QUIZ" and not self.config.get("answer"): raise ValueError("Quiz challenges require a correct answer in config")
         return self
