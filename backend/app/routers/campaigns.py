@@ -6,10 +6,11 @@ from sqlalchemy.orm import Session, joinedload
 from ..db import get_db
 from ..deps import get_current_user
 from ..models import User, Project, Campaign, Mission, Enrollment, MissionCompletion, LedgerEntry
+from ..challenge_models import Challenge
 from ..economy_models import OnchainRule, OnchainProof, CampaignAccessRule, CampaignFunding
 from ..marketplace_models import BagBuilderPathway, BagBuilderAttribution
 from ..engagement_models import ReferralConversion
-from ..schemas import CampaignCreate, CampaignOut, MissionCompleteIn
+from ..schemas import CampaignCreate, CampaignOut, ChallengeOut, MissionCompleteIn
 from ..economy import campaign_distributed_total
 from .risk import evaluate_user
 
@@ -21,6 +22,27 @@ def serialize_campaign(c: Campaign, db: Session) -> CampaignOut:
     enrolled = db.query(func.count(Enrollment.id)).filter(Enrollment.campaign_id == c.id).scalar() or 0
     completed = db.query(func.count(Enrollment.id)).filter(Enrollment.campaign_id == c.id, Enrollment.status == "COMPLETED").scalar() or 0
     payload = CampaignOut.model_validate(c); payload.enrolled_count = enrolled; payload.completed_count = completed
+    challenge_rows = db.query(Challenge).filter(Challenge.campaign_id == c.id).order_by(Challenge.position).all()
+    payload.challenges = []
+    for row in challenge_rows:
+        public = {
+            "id": row.id,
+            "campaign_id": row.campaign_id,
+            "title": row.title,
+            "description": row.description,
+            "category": row.category,
+            "provider": row.provider,
+            "action": row.action,
+            "verification_type": row.verification_type,
+            "target_url": row.target_url,
+            "target_id": row.target_id,
+            "config": {k:v for k,v in (row.config or {}).items() if k != "answer"},
+            "xp_reward": row.xp_reward,
+            "position": row.position,
+            "status": row.status,
+            "created_at": row.created_at,
+        }
+        payload.challenges.append(ChallengeOut.model_validate(public))
     return payload
 
 
@@ -50,8 +72,9 @@ def create_campaign(data: CampaignCreate, db: Session = Depends(get_db), user: U
     project = db.get(Project, data.project_id)
     if not project or project.owner_id != user.id: raise HTTPException(404, "Project not found")
     if project.status != "APPROVED": raise HTTPException(400, "Project must be approved before a campaign can be submitted")
-    campaign = Campaign(**data.model_dump(exclude={"missions"}), status="PENDING"); db.add(campaign); db.flush()
+    campaign = Campaign(**data.model_dump(exclude={"missions", "challenges"}), status="PENDING"); db.add(campaign); db.flush()
     for idx, mission_data in enumerate(data.missions): db.add(Mission(campaign_id=campaign.id, position=idx, **mission_data.model_dump()))
+    for idx, challenge_data in enumerate(data.challenges): db.add(Challenge(campaign_id=campaign.id, position=idx, **challenge_data.model_dump()))
     db.commit(); campaign = db.query(Campaign).options(joinedload(Campaign.project), joinedload(Campaign.missions)).filter(Campaign.id == campaign.id).first()
     return serialize_campaign(campaign, db)
 

@@ -89,7 +89,7 @@ def instantiate(template_id:int,data:InstantiateIn,db:Session=Depends(get_db),us
     required=data.gross_reward_per_user*Decimal(max_users)
     if data.token_allocation<required: raise HTTPException(400,f"Token allocation must cover the maximum gross reward obligation of {required} {data.reward_asset.upper()}")
     validated=CampaignCreate(project_id=project.id,title=data.title,description=template.description,category=template.category,difficulty=template.difficulty,reward_asset=data.reward_asset.upper(),funding_type=data.funding_type,token_allocation=data.token_allocation,gross_reward_per_user=data.gross_reward_per_user,user_share_pct=template.user_share_pct,nubagz_share_pct=template.nubagz_share_pct,referral_share_pct=template.referral_share_pct,max_users=max_users,missions=[spec[0] for spec in mission_specs])
-    campaign=Campaign(**validated.model_dump(exclude={"missions"}),status="PENDING");db.add(campaign);db.flush()
+    campaign=Campaign(**validated.model_dump(exclude={"missions","challenges"}),status="PENDING");db.add(campaign);db.flush()
     rules_created=0
     for idx,(mission_data,rule_spec) in enumerate(mission_specs):
         mission=Mission(campaign_id=campaign.id,position=idx,**mission_data.model_dump());db.add(mission);db.flush()

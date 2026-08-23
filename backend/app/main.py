@@ -3,9 +3,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from .config import settings
 from .db import Base, engine, SessionLocal
-from . import economy_models, risk_models, marketplace_models, engagement_models, integration_models, trust_models  # noqa: F401 - registers extension tables
+from . import economy_models, risk_models, marketplace_models, engagement_models, integration_models, trust_models, challenge_models  # noqa: F401 - registers extension tables
 from .seed import seed_demo
-from .routers import auth, projects, campaigns, users, admin, funding, earnings, prices, bagdrops, daily, onchain, trust, access, risk, referrals, builders, bounties, revenue_share, recommendations, notifications, project_analytics, templates, reviews, reports, activity, trending, watchbag, swaps, gas
+from .routers import auth, projects, campaigns, users, admin, funding, earnings, prices, bagdrops, daily, onchain, trust, access, risk, referrals, builders, bounties, revenue_share, recommendations, notifications, project_analytics, templates, reviews, reports, activity, trending, watchbag, swaps, gas, challenges
 
 
 @asynccontextmanager
@@ -17,9 +17,9 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="1.24.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.25.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-for router in (auth,projects,campaigns,users,admin,funding,earnings,prices,bagdrops,daily,onchain,trust,access,risk,referrals,builders,bounties,revenue_share,recommendations,notifications,project_analytics,templates,reviews,reports,activity,trending,watchbag,swaps,gas): app.include_router(router.router)
+for router in (auth,projects,campaigns,users,admin,funding,earnings,prices,bagdrops,daily,onchain,trust,access,risk,referrals,builders,bounties,revenue_share,recommendations,notifications,project_analytics,templates,reviews,reports,activity,trending,watchbag,swaps,gas,challenges): app.include_router(router.router)
 
 @app.get("/api/health")
-def health(): return {"status":"ok","service":"nubagz-api","version":"1.24.0"}
+def health(): return {"status":"ok","service":"nubagz-api","version":"1.25.0"}
