@@ -12,7 +12,7 @@ export default function RevenueShare(){
  const [f,setF]=useState({campaign_id:0,title:'',asset_symbol:'',funded_amount:1000,funding_reference:''})
  const load=()=>{
   if(user?.role==='ADMIN') api<Distribution[]>('/revenue-share/admin').then(data=>{setRows(data);setVerifyDrafts(current=>{const next={...current};data.filter(x=>x.status==='PENDING').forEach(x=>{if(!next[x.id])next[x.id]={funded_amount:x.funded_amount,funding_reference:x.funding_reference||''}});return next})}).catch(()=>{})
-  else if(user?.role==='CREATOR') Promise.all([api<Distribution[]>('/revenue-share'),api<Distribution[]>('/revenue-share/mine'),api<Campaign[]>('/campaigns/mine')]).then(([all,own,c])=>{setMine(own);setRows([...own,...all.filter(x=>!own.some(m=>m.id===x.id))]);setCampaigns(c);if(!f.campaign_id&&c[0])setF(v=>({...v,campaign_id:c[0].id,asset_symbol:c[0].reward_asset}))}).catch(()=>{})
+  else if(user?.role==='CREATOR') Promise.all([api<Distribution[]>('/revenue-share'),api<Distribution[]>('/revenue-share/mine'),api<Campaign[]>('/campaigns/mine')]).then(([all,own,c])=>{const eligible=c.filter(x=>x.project?.status==='LIVE'||x.project?.status==='APPROVED');setMine(own);setRows([...own,...all.filter(x=>!own.some(m=>m.id===x.id))]);setCampaigns(eligible);if(!f.campaign_id&&eligible[0])setF(v=>({...v,campaign_id:eligible[0].id,asset_symbol:eligible[0].reward_asset}))}).catch(()=>{})
   else api<Distribution[]>('/revenue-share').then(setRows).catch(()=>{})
  }
  useEffect(()=>{load()},[user?.role])
