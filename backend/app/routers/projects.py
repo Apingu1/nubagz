@@ -7,11 +7,12 @@ from ..schemas import ProjectCreate, ProjectOut
 from ..utils import slugify
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
+PUBLIC_PROJECT_STATUSES = {"LIVE", "APPROVED"}  # APPROVED retained for legacy records.
 
 
 @router.get("", response_model=list[ProjectOut])
 def list_projects(db: Session = Depends(get_db)):
-    return db.query(Project).filter(Project.status == "APPROVED").order_by(Project.created_at.desc()).all()
+    return db.query(Project).filter(Project.status.in_(PUBLIC_PROJECT_STATUSES)).order_by(Project.created_at.desc()).all()
 
 
 @router.get("/mine", response_model=list[ProjectOut])
@@ -27,7 +28,9 @@ def create_project(data: ProjectCreate, db: Session = Depends(get_db), user: Use
     while db.query(Project).filter(Project.slug == slug).first():
         slug = f"{base}-{i}"
         i += 1
-    project = Project(owner_id=user.id, slug=slug, **data.model_dump())
+    # Projects publish without a NuBagz endorsement gate. Project Trust and moderation
+    # communicate risk; administrators can suspend content when necessary.
+    project = Project(owner_id=user.id, slug=slug, status="LIVE", **data.model_dump())
     db.add(project)
     if user.role == "USER":
         user.role = "CREATOR"
@@ -39,6 +42,6 @@ def create_project(data: ProjectCreate, db: Session = Depends(get_db), user: Use
 @router.get("/{slug}", response_model=ProjectOut)
 def get_project(slug: str, db: Session = Depends(get_db)):
     project = db.query(Project).filter(Project.slug == slug).first()
-    if not project:
+    if not project or project.status == "SUSPENDED":
         raise HTTPException(404, "Project not found")
     return project
