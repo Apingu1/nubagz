@@ -23,7 +23,7 @@ def verify_wallet(client,headers,account):
     assert verified.status_code==200
 
 
-def launch_payload(name,symbol,challenge,*,max_users=2,allocation=200,gross=100,gas=False):
+def launch_payload(name,symbol,challenge,*,max_users=2,allocation=200,gross=100,min_bag_score=250):
     return {
         'project':{
             'name':name,'symbol':symbol,'description':'A complete creator launch used to prove the unified NuBagz project, Trust, Bag and Bag Work architecture.','website':'https://example.com','chain':'Avalanche','treasury_address':'0x2222222222222222222222222222222222222222'
@@ -34,7 +34,7 @@ def launch_payload(name,symbol,challenge,*,max_users=2,allocation=200,gross=100,
         'bag':{
             'project_id':0,'title':f'{name} Launch Rewards','description':'The first funded Bag is created inside the same guided launch and remains a draft until reward funding is verified.','category':'DISCOVER','difficulty':'EASY','reward_asset':symbol,'funding_type':'TOKEN','token_allocation':allocation,'gross_reward_per_user':gross,'user_share_pct':80,'nubagz_share_pct':15,'referral_share_pct':5,'max_users':max_users,'missions':[],'challenges':[challenge]
         },
-        'min_bag_score':250,
+        'min_bag_score':min_bag_score,
         'reward_funding':{'amount':allocation,'tx_hash':f'{symbol.lower()}-declared-funding'},
     }
 
@@ -78,7 +78,9 @@ def test_unified_onchain_auto_verification_accepts_sponsored_or_user_paid_tx_has
         creator=login(client,'creator@demo.nubagz.com','Creator123!');admin=login(client,'admin@demo.nubagz.com','Admin123!')
         target='0x1111111111111111111111111111111111111111';calldata='0x1234'
         challenge={'title':'Verified Avalanche action','description':'Complete the exact configured transaction and let NuBagz verify the chain result automatically.','category':'ONCHAIN','verification_type':'AUTO','target_id':target,'config':{'target_address':target,'calldata':calldata,'value_wei':'0','chain':'Avalanche'},'xp_reward':25}
-        created=client.post('/api/creator/launch',headers=creator,json=launch_payload('Unified Onchain Flow','UONCH',challenge,max_users=2,allocation=20,gross=10));assert created.status_code==200
+        # This test isolates automatic on-chain verification. BagScore gating is
+        # covered separately by the creator launch/access assertions above.
+        created=client.post('/api/creator/launch',headers=creator,json=launch_payload('Unified Onchain Flow','UONCH',challenge,max_users=2,allocation=20,gross=10,min_bag_score=0));assert created.status_code==200
         cid=created.json()['campaign_id'];challenge_id=next(c for c in client.get('/api/campaigns/mine',headers=creator).json() if c['id']==cid)['challenges'][0]['id']
         assert client.post(f'/api/funding/campaigns/{cid}/verify',headers=admin,json={'amount':20,'tx_hash':'uonch-verified'}).status_code==200
         assert client.post(f'/api/campaigns/{cid}/publish',headers=creator).status_code==200
