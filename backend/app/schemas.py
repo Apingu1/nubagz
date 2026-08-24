@@ -89,9 +89,9 @@ class GasSponsorshipCreate(BaseModel):
     def validate_sponsorship(self):
         if self.ends_at and self.starts_at and self.ends_at <= self.starts_at:
             raise ValueError("Gas Pass end time must be after its start time")
-        maximum = self.max_native_per_claim * Decimal(self.max_claims)
-        if self.funded_amount < maximum:
-            raise ValueError(f"Gas Pass funding must cover its maximum configured obligation of {maximum}")
+        # Total gas budget is intentionally independent of max claims × per-claim cap.
+        # This lets the budget itself be the first terminating limit, after which the
+        # same on-chain activity continues with normal user-paid gas.
         return self
 
 class ChallengeCreate(BaseModel):
@@ -128,6 +128,24 @@ class ChallengeCreate(BaseModel):
                 candidate=raw.lower()
                 if not (candidate.startswith("https://") or candidate.startswith("http://")): raise ValueError("Link X challenges require a full http:// or https:// URL")
             self.config={**self.config,key:raw}; self.verification_type="AUTO"; self.target_url=None; self.target_id=None
+        if self.category=="ONCHAIN" and self.verification_type=="AUTO":
+            supported={"avalanche","ethereum","base","arbitrum","polygon"}
+            chain=str(self.config.get("chain") or "").strip()
+            target=str(self.config.get("target_address") or self.target_id or "").strip()
+            if chain.lower() not in supported: raise ValueError("Automatic on-chain verification supports Avalanche, Ethereum, Base, Arbitrum and Polygon")
+            if not (target.startswith("0x") and len(target)==42): raise ValueError("Automatic on-chain Bag Work requires a 20-byte EVM target address")
+            try: int(target[2:],16)
+            except ValueError as exc: raise ValueError("Automatic on-chain Bag Work requires a valid hexadecimal EVM target address") from exc
+            calldata=str(self.config.get("calldata") or "0x").strip()
+            if not calldata.startswith("0x"): raise ValueError("On-chain transaction calldata must begin with 0x")
+            try:
+                if len(calldata)>2: int(calldata[2:],16)
+            except ValueError as exc: raise ValueError("On-chain transaction calldata must be hexadecimal") from exc
+            try: value_wei=int(str(self.config.get("value_wei") or "0"),0)
+            except (TypeError,ValueError) as exc: raise ValueError("On-chain transaction value must be a non-negative wei integer") from exc
+            if value_wei<0: raise ValueError("On-chain transaction value must be a non-negative wei integer")
+            self.target_id=target
+            self.config={**self.config,"target_address":target,"chain":chain,"calldata":calldata,"value_wei":str(value_wei)}
         if self.gas_sponsorship:
             if self.category != "ONCHAIN": raise ValueError("Gas Pass can only be attached to ONCHAIN Bag Work")
             target=str(self.config.get("target_address") or self.target_id or "").strip()
