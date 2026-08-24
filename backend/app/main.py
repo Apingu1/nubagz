@@ -6,7 +6,7 @@ from .db import Base, engine, SessionLocal
 from . import economy_models, risk_models, marketplace_models, engagement_models, integration_models, trust_models, challenge_models  # noqa: F401 - registers extension/history tables
 from .models import Project, Campaign
 from .seed import seed_demo
-from .routers import auth, projects, campaigns, users, admin, funding, earnings, prices, bagdrops, daily, onchain, trust, access, risk, referrals, bounties, revenue_share, recommendations, notifications, project_analytics, templates, reviews, reports, activity, trending, watchbag, swaps, gas, challenges
+from .routers import auth, projects, campaigns, users, admin, funding, earnings, prices, bagdrops, daily, onchain, trust, access, risk, referrals, bounties, revenue_share, recommendations, notifications, project_analytics, templates, reviews, reports, activity, trending, watchbag, swaps, gas, challenges, creator
 
 
 def normalize_legacy_publication_states(db):
@@ -35,9 +35,9 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="1.26.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.27.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origin_list, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-for router in (auth,projects,campaigns,users,admin,funding,earnings,prices,bagdrops,daily,onchain,trust,access,risk,referrals,bounties,revenue_share,recommendations,notifications,project_analytics,templates,reviews,reports,activity,trending,watchbag,swaps,gas,challenges): app.include_router(router.router)
+for router in (auth,projects,campaigns,users,admin,funding,earnings,prices,bagdrops,daily,onchain,trust,access,risk,referrals,bounties,revenue_share,recommendations,notifications,project_analytics,templates,reviews,reports,activity,trending,watchbag,swaps,gas,challenges,creator): app.include_router(router.router)
 
 @app.get("/api/health")
-def health(): return {"status":"ok","service":"nubagz-api","version":"1.26.0"}
+def health(): return {"status":"ok","service":"nubagz-api","version":"1.27.0"}
