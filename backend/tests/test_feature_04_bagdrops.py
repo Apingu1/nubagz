@@ -14,7 +14,7 @@ def test_bagdrop_requires_admin_activation_and_prevents_double_claim():
         admin = login(client, 'admin@demo.nubagz.com', 'Admin123!')
         earner = login(client, 'demo@demo.nubagz.com', 'Demo123!')
         projects = client.get('/api/projects/mine', headers=creator).json()
-        project = next(p for p in projects if p['status'] == 'APPROVED')
+        project = next(p for p in projects if p['status'] in {'LIVE', 'APPROVED'})
 
         created = client.post('/api/bagdrops', headers=creator, json={
             'project_id': project['id'], 'title': 'Feature Four Drop', 'rarity': 'RARE',
