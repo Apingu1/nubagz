@@ -10,7 +10,6 @@ def login(client,email,password):
 def test_campaign_templates_reuse_structure_without_bypassing_funding_publish_or_onchain_rules():
     with TestClient(app) as client:
         creator=login(client,'creator@demo.nubagz.com','Creator123!')
-        admin=login(client,'admin@demo.nubagz.com','Admin123!')
         templates=client.get('/api/templates',headers=creator);assert templates.status_code==200
         systems=[t for t in templates.json() if t['is_system']]
         assert len(systems)>=2
@@ -26,7 +25,7 @@ def test_campaign_templates_reuse_structure_without_bypassing_funding_publish_or
         assert out['status']=='DRAFT' and out['funding_status']=='UNFUNDED'
         assert out['missions_created']==len(template['missions']) and out['onchain_rules_created']==0
         blocked=client.post(f'/api/campaigns/{cid}/publish',headers=creator)
-        assert blocked.status_code==400 and 'funding' in blocked.json()['detail'].lower()
+        assert blocked.status_code==409 and 'funding' in blocked.json()['detail'].lower()
 
         # Add a stronger verification rule to the source campaign before saving it.
         source_mission=client.get(f'/api/campaigns/{cid}').json()['missions'][0]
@@ -51,4 +50,4 @@ def test_campaign_templates_reuse_structure_without_bypassing_funding_publish_or
         cloned_rule=next(r for r in mine.json() if r['mission_id']==clone_mission['id'])
         assert cloned_rule['rule_type']=='CONTRACT_INTERACTION'
         assert cloned_rule['contract_address']=='0x1111111111111111111111111111111111111111'
-        assert client.post(f"/api/campaigns/{clone['id']}/publish",headers=creator).status_code==400
+        assert client.post(f"/api/campaigns/{clone['id']}/publish",headers=creator).status_code==409
