@@ -21,6 +21,7 @@ router = APIRouter(prefix="/api/gas", tags=["sponsored-gas"])
 SUPPORTED = {"avalanche":"AVAX","ethereum":"ETH","base":"ETH","arbitrum":"ETH","polygon":"POL"}
 CHAIN_IDS = {"avalanche":43114,"ethereum":1,"base":8453,"arbitrum":42161,"polygon":137}
 ACTIVE_CLAIM_STATUSES = {"RESERVED", "EXECUTED"}
+PUBLIC_PROJECT_STATUSES = {"LIVE", "APPROVED"}
 
 class FundingVerifyIn(BaseModel):
     funded_amount:Decimal=Field(gt=0)
@@ -129,7 +130,7 @@ def _claim_payload(row:GasSponsorshipClaim,db:Session,mode:str="SPONSORED"):
 @router.get("/status")
 def provider_status(_:User=Depends(get_current_user)):
     configured=bool(settings.gas_sponsor_provider_base_url)
-    return {"configured":configured,"mode":"PROVIDER_BACKED" if configured else "DRAFT_ONLY","principle":"Gas Pass is optional project-funded sponsorship attached to specific on-chain Bag Work. When sponsorship is unavailable, the activity remains available with normal user-paid network gas."}
+    return {"configured":configured,"mode":"PROVIDER_BACKED" if configured else "DRAFT_ONLY","principle":"Gas Pass is optional project-funded sponsorship attached to specific on-chain Bag Work. Time, unique-user, claim, per-wallet and total-budget caps are independent; whichever limit is hit first returns the activity to normal user-paid gas."}
 
 @router.get("/policies/mine")
 def my_policies(db:Session=Depends(get_db),user:User=Depends(get_current_user)):
@@ -143,8 +144,10 @@ def admin_policies(db:Session=Depends(get_db),_:User=Depends(require_admin)):
 def verify_policy(policy_id:int,data:FundingVerifyIn,db:Session=Depends(get_db),_:User=Depends(require_admin)):
     row=db.query(GasSponsorshipPolicy).filter(GasSponsorshipPolicy.id==policy_id).with_for_update().first()
     if not row:raise HTTPException(404,"Gas Pass policy not found")
-    required=Decimal(row.max_native_per_claim)*Decimal(row.max_claims)
-    if data.funded_amount<required:raise HTTPException(400,f"Verified gas funding must cover the maximum configured obligation of {required} {row.native_asset}")
+    # Gas budget is an independent cap, not an obligation to pre-fund every
+    # theoretical claim at the per-claim maximum. Admin verifies the actual
+    # project-funded gas pool; once that pool is exhausted the activity falls
+    # back to normal user-paid network gas.
     row.funded_amount=data.funded_amount;row.funding_reference=data.funding_reference.strip();row.funding_status="VERIFIED";row.status="ACTIVE";db.commit();return _policy_payload(row,db)
 
 @router.post("/policies/{policy_id}/status")
@@ -170,7 +173,7 @@ def challenge_gas_status(challenge_id:int,db:Session=Depends(get_db),user:User=D
 @router.post("/challenges/{challenge_id}/prepare")
 def prepare_sponsorship(challenge_id:int,_:PrepareIn,db:Session=Depends(get_db),user:User=Depends(get_current_user)):
     challenge=db.get(Challenge,challenge_id);campaign=db.get(Campaign,challenge.campaign_id) if challenge else None;project=db.get(Project,campaign.project_id) if campaign else None
-    if not challenge or challenge.category!="ONCHAIN" or challenge.status!="ACTIVE" or not campaign or campaign.status!="LIVE" or not project or project.status in {"SUSPENDED","ARCHIVED"}:raise HTTPException(404,"Live on-chain Bag Work not found")
+    if not challenge or challenge.category!="ONCHAIN" or challenge.status!="ACTIVE" or not campaign or campaign.status!="LIVE" or not project or project.status not in PUBLIC_PROJECT_STATUSES:raise HTTPException(404,"Live on-chain Bag Work not found")
     transaction=_build_transaction(challenge,str((challenge.config or {}).get("chain") or project.chain));policy=db.query(GasSponsorshipPolicy).filter(GasSponsorshipPolicy.challenge_id==challenge.id).with_for_update().first()
     if not policy:return {"mode":"USER_PAID","reason":"NO_SPONSORSHIP","transaction":transaction}
     _ensure_enrollment(db,user,campaign);wallet=_verified_wallet(db,user)
@@ -190,8 +193,8 @@ def execute_sponsorship(claim_id:int,db:Session=Depends(get_db),user:User=Depend
     if claim.status=="EXECUTED":return _claim_payload(claim,db)
     if claim.status!="RESERVED" or _as_utc(claim.reservation_expires_at)<_now():claim.status="RELEASED";db.commit();raise HTTPException(409,"Gas Pass reservation expired. Prepare the activity again; normal user-paid gas remains available.")
     if not settings.gas_sponsor_provider_base_url:raise HTTPException(503,"Gas sponsorship provider is not configured. No project gas budget was spent.")
-    policy=db.query(GasSponsorshipPolicy).filter(GasSponsorshipPolicy.id==claim.policy_id).with_for_update().first();challenge=db.get(Challenge,claim.challenge_id);campaign=db.get(Campaign,claim.campaign_id);wallet=db.get(WalletConnection,claim.wallet_connection_id)
-    if not policy or policy.status!="ACTIVE" or policy.funding_status!="VERIFIED" or not challenge or challenge.status!="ACTIVE" or not campaign or campaign.status!="LIVE" or not wallet or wallet.user_id!=user.id or not wallet.verified_at:raise HTTPException(409,"This Gas Pass reservation is no longer eligible")
+    policy=db.query(GasSponsorshipPolicy).filter(GasSponsorshipPolicy.id==claim.policy_id).with_for_update().first();challenge=db.get(Challenge,claim.challenge_id);campaign=db.get(Campaign,claim.campaign_id);wallet=db.get(WalletConnection,claim.wallet_connection_id);project=db.get(Project,campaign.project_id) if campaign else None
+    if not policy or policy.status!="ACTIVE" or policy.funding_status!="VERIFIED" or not challenge or challenge.status!="ACTIVE" or not campaign or campaign.status!="LIVE" or not project or project.status not in PUBLIC_PROJECT_STATUSES or not wallet or wallet.user_id!=user.id or not wallet.verified_at:raise HTTPException(409,"This Gas Pass reservation is no longer eligible")
     starts=_as_utc(policy.starts_at);ends=_as_utc(policy.ends_at);now=_now()
     if (starts and starts>now) or (ends and ends<now):raise HTTPException(409,"This Gas Pass time window is no longer active. Normal user-paid gas remains available.")
     transaction=_build_transaction(challenge,policy.chain)
