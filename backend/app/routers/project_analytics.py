@@ -7,7 +7,6 @@ from ..db import get_db
 from ..deps import get_current_user
 from ..models import User, Project, Campaign, Enrollment, LedgerEntry
 from ..economy_models import CampaignFunding
-from ..marketplace_models import BagBuilderAttribution
 from ..economy import CAMPAIGN_SETTLEMENT_ENTRY_TYPES, campaign_distributed_total
 
 router = APIRouter(prefix="/api/project-analytics", tags=["project-analytics"])
@@ -29,7 +28,6 @@ def campaign_metrics(db: Session, campaign: Campaign):
         breakdown[row.entry_type] += Decimal(row.amount)
 
     referral_conversions = db.query(func.count(Enrollment.id)).join(User, User.id == Enrollment.user_id).filter(Enrollment.campaign_id == campaign.id, Enrollment.status == "COMPLETED", User.referred_by_id.isnot(None)).scalar() or 0
-    builder_conversions = db.query(func.count(Enrollment.id)).join(BagBuilderAttribution, (BagBuilderAttribution.user_id == Enrollment.user_id) & (BagBuilderAttribution.campaign_id == Enrollment.campaign_id)).filter(Enrollment.campaign_id == campaign.id, Enrollment.status == "COMPLETED").scalar() or 0
     completion_rate = (Decimal(completions) / Decimal(enrollments) * Decimal("100")) if enrollments else Decimal("0")
     cost_per_completion = (distributed / Decimal(completions)) if completions else None
     required = Decimal(campaign.gross_reward_per_user) * Decimal(campaign.max_users)
@@ -60,7 +58,6 @@ def campaign_metrics(db: Session, campaign: Campaign):
         "reconciled": reconciled,
         "cost_per_completed_participant": str(cost_per_completion) if cost_per_completion is not None else None,
         "referral_conversions": int(referral_conversions),
-        "bagbuilder_conversions": int(builder_conversions),
     }
 
 
@@ -102,7 +99,7 @@ def my_project_analytics(db: Session = Depends(get_db), user: User = Depends(get
             "completions": sum(p["completions"] for p in payloads),
             "unique_completed_participants": len({row[0] for row in db.query(Enrollment.user_id).join(Campaign, Campaign.id == Enrollment.campaign_id).join(Project, Project.id == Campaign.project_id).filter(Project.owner_id == user.id, Enrollment.status == "COMPLETED").distinct().all()}),
         },
-        "principle": "NuBagz analytics report verified participation and reconciled campaign settlement entries. Separate products such as fixed revenue-share distributions remain attributable without consuming a Bag's verified reward inventory.",
+        "principle": "NuBagz analytics report verified participation and reconciled campaign settlement entries. Referrals remain the user-acquisition reward mechanism; the retired BagBuilder pathway no longer participates in new settlement.",
     }
 
 
