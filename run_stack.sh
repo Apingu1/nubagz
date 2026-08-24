@@ -11,8 +11,13 @@ fail()  { printf '\033[1;31m[ERROR]\033[0m %s\n' "$*" >&2; exit 1; }
 
 command -v docker >/dev/null 2>&1 || fail "Docker is not installed or not available in this Codespace."
 docker compose version >/dev/null 2>&1 || fail "Docker Compose v2 is not available."
-
 [[ -f docker-compose.yml ]] || fail "docker-compose.yml was not found. Run this script from the NuBagz repository."
+
+if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  BRANCH="$(git branch --show-current 2>/dev/null || true)"
+  SHORT_SHA="$(git rev-parse --short HEAD 2>/dev/null || true)"
+  info "Source: ${BRANCH:-detached HEAD} @ ${SHORT_SHA:-unknown}"
+fi
 
 if [[ ! -f .env ]]; then
   info "No .env found. Creating one from .env.example..."
@@ -123,8 +128,11 @@ else
   ok "Privy social-login environment is configured."
 fi
 
-info "Building and starting NuBagz..."
-docker compose up -d --build --remove-orphans
+info "Building and starting fresh NuBagz app containers..."
+# --force-recreate prevents an older web/api container from surviving a source
+# switch or rebuild. The named Postgres volume remains intact, so application
+# data is preserved while the app containers are refreshed.
+docker compose up -d --build --force-recreate --remove-orphans
 
 info "Waiting for NuBagz to become ready..."
 READY=0
@@ -165,4 +173,4 @@ printf '  docker compose logs -f          # follow all logs\n'
 printf '  docker compose logs -f api      # backend logs\n'
 printf '  docker compose logs -f web      # frontend logs\n'
 printf '  docker compose down             # stop NuBagz, keep database\n'
-printf '  docker compose up -d --build    # rebuild/start manually\n\n'
+printf '  docker compose up -d --build --force-recreate  # rebuild/start manually\n\n'
