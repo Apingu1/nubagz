@@ -68,3 +68,26 @@ class ChallengeCompletion(Base):
     submitted_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class ChallengeOnchainProof(Base):
+    """Verified transaction proof for unified ONCHAIN Bag Work.
+
+    A transaction hash may satisfy a particular challenge only once. This prevents
+    a public transaction from being replayed by multiple NuBagz participants.
+    """
+
+    __tablename__ = "challenge_onchain_proofs"
+    __table_args__ = (
+        UniqueConstraint("challenge_id", "tx_hash", name="uq_challenge_onchain_tx"),
+        UniqueConstraint("challenge_id", "user_id", name="uq_challenge_onchain_user"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    challenge_id: Mapped[int] = mapped_column(ForeignKey("challenges.id"), index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    wallet_address: Mapped[str] = mapped_column(String(255), index=True)
+    chain: Mapped[str] = mapped_column(String(32), index=True)
+    tx_hash: Mapped[str] = mapped_column(String(255), index=True)
+    target_address: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    verified_at: Mapped[datetime] = mapped_column(DateTime, default=now)
