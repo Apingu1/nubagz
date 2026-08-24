@@ -74,7 +74,7 @@ def test_anti_sybil_signals_privacy_and_restriction_enforcement():
         daily=client.get('/api/daily/earn',headers=bh)
         assert daily.status_code==200 and daily.json()['restricted'] is True and daily.json()['opportunity_count']==0
 
-        project=next(p for p in client.get('/api/projects/mine',headers=creator).json() if p['status']=='APPROVED')
+        project=next(p for p in client.get('/api/projects/mine',headers=creator).json() if p['status'] in {'LIVE','APPROVED'})
         drop=client.post('/api/bagdrops',headers=creator,json={'project_id':project['id'],'title':'Risk Gated Drop','rarity':'COMMON','max_claims':2,'min_bag_score':0,'funding_tx_hash':'risk-drop-funding','items':[{'asset':'RISK','amount_per_claim':1,'funded_amount':2}]})
         assert drop.status_code==200
         assert client.post(f"/api/bagdrops/{drop.json()['id']}/activate",headers=admin).status_code==200
