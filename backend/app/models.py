@@ -90,7 +90,7 @@ class Project(Base):
     website: Mapped[str | None] = mapped_column(String(255), nullable=True)
     chain: Mapped[str] = mapped_column(String(32), default="Avalanche")
     logo_url: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    status: Mapped[str] = mapped_column(String(24), default="PENDING", index=True)
+    status: Mapped[str] = mapped_column(String(24), default="LIVE", index=True)
     treasury_address: Mapped[str | None] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
@@ -114,7 +114,7 @@ class Campaign(Base):
     nubagz_share_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("15"))
     referral_share_pct: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=Decimal("5"))
     max_users: Mapped[int] = mapped_column(Integer, default=1000)
-    status: Mapped[str] = mapped_column(String(24), default="PENDING", index=True)
+    status: Mapped[str] = mapped_column(String(24), default="DRAFT", index=True)
     featured: Mapped[bool] = mapped_column(Boolean, default=False)
     estimated_value_gbp: Mapped[Decimal | None] = mapped_column(Numeric(18, 4), nullable=True)
     starts_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
