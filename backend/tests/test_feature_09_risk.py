@@ -44,12 +44,34 @@ def test_anti_sybil_signals_privacy_and_restriction_enforcement():
         assert any(s['type']=='SHARED_DEVICE_INSTALL' for s in data['signals'])
         assert 'cross-site' in data['privacy_note']
 
+        # Give this test its own fully funded live Bag so it does not depend on
+        # capacity or reward inventory consumed by earlier tests.
+        project=client.post('/api/projects',headers=creator,json={
+            'name':'Risk Isolation Project','symbol':'RISKISO',
+            'description':'Isolated project used only to verify anti-Sybil enforcement on earning routes.',
+            'chain':'Avalanche'
+        })
+        assert project.status_code==200 and project.json()['status']=='LIVE'
+        project_id=project.json()['id']
+        bag=client.post('/api/campaigns',headers=creator,json={
+            'project_id':project_id,'title':'Risk Isolation Bag',
+            'description':'Fresh funded Bag used to test risk enforcement without relying on shared test fixtures.',
+            'category':'LEARN','difficulty':'EASY','reward_asset':'RISKISO','funding_type':'TOKEN',
+            'token_allocation':10,'gross_reward_per_user':1,'user_share_pct':80,'nubagz_share_pct':15,
+            'referral_share_pct':5,'max_users':10,
+            'missions':[{'title':'Risk route check','description':'Simple isolated work item for risk-route enrollment testing.','mission_type':'LEARN','verification_type':'SELF_ATTEST','xp_reward':1}]
+        })
+        assert bag.status_code==200 and bag.json()['status']=='DRAFT'
+        target_id=bag.json()['id']
+        assert client.post(f'/api/funding/campaigns/{target_id}/declare',headers=creator,json={'amount':10,'tx_hash':'risk-isolation-funding'}).status_code==200
+        assert client.post(f'/api/funding/campaigns/{target_id}/verify',headers=admin,json={'amount':10,'tx_hash':'risk-isolation-funding'}).status_code==200
+        assert client.post(f'/api/campaigns/{target_id}/publish',headers=creator).status_code==200
+
         # Earning routes perform their own fresh risk evaluation instead of trusting stale profile state.
         auto=client.post('/api/auth/register',json={'email':'risk-auto@example.com','username':'RiskAutoUser','password':'RiskPass123!'})
         assert auto.status_code==200
         autoh={'Authorization':f"Bearer {auto.json()['access_token']}"}
-        target=next(c for c in client.get('/api/campaigns/mine',headers=creator).json() if c['status']=='LIVE')
-        enrolled=client.post(f"/api/campaigns/{target['id']}/enroll",headers=autoh)
+        enrolled=client.post(f"/api/campaigns/{target_id}/enroll",headers=autoh)
         assert enrolled.status_code==200
         db=SessionLocal()
         try:
@@ -69,13 +91,12 @@ def test_anti_sybil_signals_privacy_and_restriction_enforcement():
         overview=client.get('/api/admin/overview',headers=admin)
         assert overview.status_code==200 and overview.json()['open_flags']>=2
 
-        blocked=client.post(f"/api/campaigns/{target['id']}/enroll",headers=bh)
+        blocked=client.post(f"/api/campaigns/{target_id}/enroll",headers=bh)
         assert blocked.status_code==403 and 'restricted' in blocked.json()['detail'].lower()
         daily=client.get('/api/daily/earn',headers=bh)
         assert daily.status_code==200 and daily.json()['restricted'] is True and daily.json()['opportunity_count']==0
 
-        project=next(p for p in client.get('/api/projects/mine',headers=creator).json() if p['status'] in {'LIVE','APPROVED'})
-        drop=client.post('/api/bagdrops',headers=creator,json={'project_id':project['id'],'title':'Risk Gated Drop','rarity':'COMMON','max_claims':2,'min_bag_score':0,'funding_tx_hash':'risk-drop-funding','items':[{'asset':'RISK','amount_per_claim':1,'funded_amount':2}]})
+        drop=client.post('/api/bagdrops',headers=creator,json={'project_id':project_id,'title':'Risk Gated Drop','rarity':'COMMON','max_claims':2,'min_bag_score':0,'funding_tx_hash':'risk-drop-funding','items':[{'asset':'RISK','amount_per_claim':1,'funded_amount':2}]})
         assert drop.status_code==200
         assert client.post(f"/api/bagdrops/{drop.json()['id']}/activate",headers=admin).status_code==200
         blocked_drop=client.post(f"/api/bagdrops/{drop.json()['id']}/claim",headers=bh)
