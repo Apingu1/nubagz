@@ -28,7 +28,11 @@ def test_onchain_rule_is_authoritative_frozen_and_tx_cannot_be_reused():
         earner = login(client, 'demo@demo.nubagz.com', 'Demo123!')
         account = Account.create()
         verify_wallet(client, earner, account)
-        campaign = client.get('/api/campaigns/mine', headers=creator).json()[0]
+        # The legacy /onchain router remains only for compatibility. New unified
+        # Bag Work campaigns may contain no legacy missions, so select a seeded
+        # campaign that actually has one rather than assuming list position zero.
+        campaigns = client.get('/api/campaigns/mine', headers=creator).json()
+        campaign = next(c for c in campaigns if c['missions'])
         mission_id = campaign['missions'][0]['id']
 
         unsupported = client.post('/api/onchain/rules', headers=creator, json={
