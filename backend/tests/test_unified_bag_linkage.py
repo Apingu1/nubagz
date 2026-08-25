@@ -99,6 +99,8 @@ def test_full_reward_funding_makes_new_bag_live_and_discoverable_automatically()
         assert verified.json()['fully_funded'] is True
         assert verified.json()['campaign_status'] == 'LIVE'
         assert verified.json()['discoverable'] is True
+        assert verified.json()['active_work_count'] == 1
+        assert verified.json()['discoverability_blockers'] == []
 
         after = client.get('/api/challenges', headers=user)
         assert after.status_code == 200
