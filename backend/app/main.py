@@ -1,5 +1,4 @@
 from contextlib import asynccontextmanager
-from decimal import Decimal
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
@@ -8,12 +7,9 @@ from .db import Base, engine, SessionLocal
 from . import economy_models, risk_models, marketplace_models, engagement_models, integration_models, trust_models, challenge_models  # noqa: F401 - registers extension/history tables
 from .models import Project, Campaign, Mission, MissionCompletion
 from .challenge_models import Challenge, ChallengeCompletion
-from .economy_models import CampaignFunding
+from .bag_lifecycle import reconcile_verified_drafts
 from .seed import seed_demo
 from .routers import auth, projects, campaigns, users, admin, funding, earnings, prices, bagdrops, daily, onchain, trust, access, risk, referrals, bounties, revenue_share, recommendations, notifications, project_analytics, templates, reviews, reports, activity, trending, watchbag, swaps, gas, challenges, creator
-
-
-PUBLIC_PROJECT_STATUSES = {"LIVE", "APPROVED"}
 
 
 def ensure_runtime_schema():
@@ -136,43 +132,6 @@ def backfill_legacy_missions_to_challenges(db):
         db.commit()
 
 
-def reconcile_previously_verified_bags(db):
-    """Promote existing fully funded draft Bagz into the unified marketplace.
-
-    Before v1.28 funding verification and creator publication were two separate
-    actions. Existing installations can therefore contain a VERIFIED funding row
-    attached to a DRAFT Bag. Preserve explicit PAUSED/SUSPENDED states, but make
-    old DRAFT/PENDING Bagz LIVE when their project is public, reward liability is
-    fully covered and at least one Bag Work activity exists.
-    """
-    changed = False
-    rows = db.query(Campaign).filter(Campaign.status.in_({"DRAFT", "PENDING"})).all()
-    for campaign in rows:
-        project = db.get(Project, campaign.project_id)
-        if not project or project.status not in PUBLIC_PROJECT_STATUSES:
-            continue
-        funding_row = db.query(CampaignFunding).filter(
-            CampaignFunding.campaign_id == campaign.id,
-            CampaignFunding.status == "VERIFIED",
-        ).first()
-        if not funding_row:
-            continue
-        required = Decimal(campaign.gross_reward_per_user) * Decimal(campaign.max_users)
-        if Decimal(funding_row.verified_amount or 0) < required:
-            continue
-        active_work = db.query(Challenge.id).filter(
-            Challenge.campaign_id == campaign.id,
-            Challenge.status == "ACTIVE",
-        ).first()
-        legacy_work = db.query(Mission.id).filter(Mission.campaign_id == campaign.id).first()
-        if not active_work and not legacy_work:
-            continue
-        campaign.status = "LIVE"
-        changed = True
-    if changed:
-        db.commit()
-
-
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
@@ -182,7 +141,7 @@ async def lifespan(_: FastAPI):
         normalize_legacy_publication_states(db)
         seed_demo(db)
         backfill_legacy_missions_to_challenges(db)
-        reconcile_previously_verified_bags(db)
+        reconcile_verified_drafts(db)
     finally:
         db.close()
     yield
