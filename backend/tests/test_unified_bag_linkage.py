@@ -9,24 +9,27 @@ def login(client, email, password):
     return {'Authorization': f"Bearer {response.json()['access_token']}"}
 
 
-def test_featured_home_bags_are_present_in_unified_bag_work():
-    """A Bag visible on Home must never disappear from the Bag Work marketplace."""
+def test_public_live_bags_with_active_work_are_present_in_unified_bag_work():
+    """Bag Work is the marketplace; every public LIVE Bag with active work belongs there."""
     with TestClient(app) as client:
         user = login(client, 'demo@demo.nubagz.com', 'Demo123!')
-        featured = client.get('/api/campaigns?featured=true')
-        assert featured.status_code == 200
-        featured_rows = featured.json()
-        assert featured_rows, 'Demo Home should expose at least one featured Bag'
+        campaigns = client.get('/api/campaigns')
+        assert campaigns.status_code == 200
+        public_rows = campaigns.json()
+        eligible = [
+            bag for bag in public_rows
+            if any(challenge.get('status') == 'ACTIVE' for challenge in bag.get('challenges', []))
+        ]
+        assert eligible, 'Demo data should expose at least one public LIVE Bag with active Bag Work'
 
         work = client.get('/api/challenges', headers=user)
         assert work.status_code == 200
-        work_rows = work.json()
-        campaign_ids = {row['campaign_id'] for row in work_rows}
+        campaign_ids = {row['campaign_id'] for row in work.json()}
 
-        for bag in featured_rows:
+        for bag in eligible:
             assert bag['id'] in campaign_ids, (
-                f"Featured Home Bag {bag['id']} ({bag['title']}) is not represented "
-                "in the unified Bag Work feed"
+                f"Public LIVE Bag {bag['id']} ({bag['title']}) has active work but is not "
+                "represented in the unified Bag Work marketplace"
             )
 
 
