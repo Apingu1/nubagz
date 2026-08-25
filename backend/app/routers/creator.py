@@ -50,8 +50,6 @@ class ProjectTrustDraft(BaseModel):
                 raise ValueError("Token launch date must use YYYY-MM-DD") from exc
             if launched > datetime.now(UTC).date():
                 raise ValueError("Token launch date cannot be in the future")
-        if self.team_verified and not (self.team_url or "").strip():
-            raise ValueError("Team identity evidence needs a team/founder evidence URL")
         return self
 
     def has_content(self) -> bool:
