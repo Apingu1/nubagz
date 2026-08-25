@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import inspect, text
 from .config import settings
 from .db import Base, engine, SessionLocal
 from . import economy_models, risk_models, marketplace_models, engagement_models, integration_models, trust_models, challenge_models  # noqa: F401 - registers extension/history tables
@@ -8,6 +9,22 @@ from .models import Project, Campaign, Mission, MissionCompletion
 from .challenge_models import Challenge, ChallengeCompletion
 from .seed import seed_demo
 from .routers import auth, projects, campaigns, users, admin, funding, earnings, prices, bagdrops, daily, onchain, trust, access, risk, referrals, bounties, revenue_share, recommendations, notifications, project_analytics, templates, reviews, reports, activity, trending, watchbag, swaps, gas, challenges, creator
+
+
+def ensure_runtime_schema():
+    """Apply tiny additive compatibility upgrades to existing local databases.
+
+    Base.metadata.create_all creates new tables but does not add columns to an
+    existing table. Keep this additive and idempotent so pulling a newer branch
+    never requires deleting the user's current NuBagz database.
+    """
+    inspector = inspect(engine)
+    if "project_trust_evidence" not in inspector.get_table_names():
+        return
+    columns = {column["name"] for column in inspector.get_columns("project_trust_evidence")}
+    if "team_url" not in columns:
+        with engine.begin() as connection:
+            connection.execute(text("ALTER TABLE project_trust_evidence ADD COLUMN team_url VARCHAR(500)"))
 
 
 def normalize_legacy_publication_states(db):
@@ -117,6 +134,7 @@ def backfill_legacy_missions_to_challenges(db):
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
+    ensure_runtime_schema()
     db = SessionLocal()
     try:
         normalize_legacy_publication_states(db)
