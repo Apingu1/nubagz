@@ -1,13 +1,15 @@
-from datetime import date, datetime, UTC
+from datetime import UTC, date, datetime
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
+
 from ..db import get_db
 from ..deps import get_current_user, require_admin
-from ..models import User, Project, Campaign, Enrollment
 from ..economy_models import CampaignFunding
+from ..models import Campaign, Enrollment, Project, User
 from ..trust_models import ProjectTrustEvidence
 
 router = APIRouter(prefix="/api/trust", tags=["trust"])
@@ -84,8 +86,10 @@ def evidence_payload(evidence: ProjectTrustEvidence | None):
 
 def project_trust(project: Project, db: Session):
     campaigns = db.query(Campaign).filter(Campaign.project_id == project.id).all()
-    campaign_ids = [c.id for c in campaigns]
-    evidence = db.query(ProjectTrustEvidence).filter(ProjectTrustEvidence.project_id == project.id).first()
+    campaign_ids = [campaign.id for campaign in campaigns]
+    evidence = db.query(ProjectTrustEvidence).filter(
+        ProjectTrustEvidence.project_id == project.id
+    ).first()
     evidence_verified = bool(evidence and evidence.verification_status == "VERIFIED")
 
     fully_funded = 0
@@ -101,7 +105,9 @@ def project_trust(project: Project, db: Session):
     funding_points = min(20, int(funding_ratio * Decimal("20")))
 
     if campaign_ids:
-        enrollments = db.query(func.count(Enrollment.id)).filter(Enrollment.campaign_id.in_(campaign_ids)).scalar() or 0
+        enrollments = db.query(func.count(Enrollment.id)).filter(
+            Enrollment.campaign_id.in_(campaign_ids)
+        ).scalar() or 0
         completions = db.query(func.count(Enrollment.id)).filter(
             Enrollment.campaign_id.in_(campaign_ids),
             Enrollment.status == "COMPLETED",
@@ -191,9 +197,29 @@ def project_trust(project: Project, db: Session):
 
 
 @router.get("/projects")
-def trust_projects(db: Session = Depends(get_db)):
-    projects = db.query(Project).filter(Project.status.in_(PUBLIC_PROJECT_STATUSES)).order_by(Project.created_at.desc()).all()
-    return sorted([project_trust(p, db) for p in projects], key=lambda item: item["score"], reverse=True)
+def trust_projects(
+    q: str | None = Query(default=None, max_length=255),
+    db: Session = Depends(get_db),
+):
+    query = db.query(Project).outerjoin(
+        ProjectTrustEvidence,
+        ProjectTrustEvidence.project_id == Project.id,
+    ).filter(Project.status.in_(PUBLIC_PROJECT_STATUSES))
+    term = (q or "").strip()
+    if term:
+        pattern = f"%{term}%"
+        query = query.filter(or_(
+            Project.name.ilike(pattern),
+            Project.symbol.ilike(pattern),
+            Project.chain.ilike(pattern),
+            ProjectTrustEvidence.contract_address.ilike(pattern),
+        ))
+    projects = query.order_by(Project.created_at.desc()).all()
+    return sorted(
+        [project_trust(project, db) for project in projects],
+        key=lambda item: item["score"],
+        reverse=True,
+    )
 
 
 @router.get("/projects/{project_id}")
@@ -205,7 +231,11 @@ def trust_project(project_id: int, db: Session = Depends(get_db)):
 
 
 @router.post("/evidence")
-def submit_evidence(data: TrustEvidenceIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def submit_evidence(
+    data: TrustEvidenceIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     project = db.get(Project, data.project_id)
     if not project or (project.owner_id != user.id and user.role != "ADMIN"):
         raise HTTPException(403, "You do not manage this project")
@@ -219,7 +249,9 @@ def submit_evidence(data: TrustEvidenceIn, db: Session = Depends(get_db), user: 
     if data.team_verified and not (data.team_url or "").strip():
         raise HTTPException(400, "Add a team/founder evidence URL before submitting team identity evidence")
 
-    evidence = db.query(ProjectTrustEvidence).filter(ProjectTrustEvidence.project_id == project.id).first()
+    evidence = db.query(ProjectTrustEvidence).filter(
+        ProjectTrustEvidence.project_id == project.id
+    ).first()
     if not evidence:
         evidence = ProjectTrustEvidence(project_id=project.id, submitted_by_id=user.id)
         db.add(evidence)
@@ -232,25 +264,39 @@ def submit_evidence(data: TrustEvidenceIn, db: Session = Depends(get_db), user: 
     evidence.verified_at = None
     db.commit()
     db.refresh(evidence)
-    return {"project_id": project.id, "evidence": evidence_payload(evidence), "score": project_trust(project, db)["score"]}
+    return {
+        "project_id": project.id,
+        "evidence": evidence_payload(evidence),
+        "score": project_trust(project, db)["score"],
+    }
 
 
 @router.get("/admin/evidence")
-def admin_evidence(db: Session = Depends(get_db), _: User = Depends(require_admin)):
+def admin_evidence(
+    db: Session = Depends(get_db),
+    _: User = Depends(require_admin),
+):
     rows = db.query(ProjectTrustEvidence).order_by(ProjectTrustEvidence.updated_at.desc()).all()
     return [
         {
-            "project_id": e.project_id,
-            "project_name": db.get(Project, e.project_id).name,
-            "evidence": evidence_payload(e),
+            "project_id": evidence.project_id,
+            "project_name": db.get(Project, evidence.project_id).name,
+            "evidence": evidence_payload(evidence),
         }
-        for e in rows
+        for evidence in rows
     ]
 
 
 @router.post("/admin/evidence/{project_id}/verify")
-def verify_evidence(project_id: int, data: TrustVerifyIn, db: Session = Depends(get_db), admin: User = Depends(require_admin)):
-    evidence = db.query(ProjectTrustEvidence).filter(ProjectTrustEvidence.project_id == project_id).first()
+def verify_evidence(
+    project_id: int,
+    data: TrustVerifyIn,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    evidence = db.query(ProjectTrustEvidence).filter(
+        ProjectTrustEvidence.project_id == project_id
+    ).first()
     if not evidence:
         raise HTTPException(404, "Trust evidence not found")
     status = data.status.upper()
