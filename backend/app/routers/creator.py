@@ -32,6 +32,7 @@ class ProjectTrustDraft(BaseModel):
     token_launch_date: str | None = Field(default=None, max_length=32)
     docs_url: str | None = Field(default=None, max_length=500)
     socials_url: str | None = Field(default=None, max_length=500)
+    team_url: str | None = Field(default=None, max_length=500)
     contract_source_verified: bool = False
     dangerous_permissions_absent: bool = False
     liquidity_verified: bool = False
@@ -41,7 +42,7 @@ class ProjectTrustDraft(BaseModel):
     socials_verified: bool = False
 
     @model_validator(mode="after")
-    def validate_launch_date(self):
+    def validate_trust_draft(self):
         if self.token_launch_date:
             try:
                 launched = date.fromisoformat(self.token_launch_date[:10])
@@ -132,12 +133,12 @@ def launch_project_and_first_bag(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Create the project, trust draft, first Bag, Bag Work and funding declaration atomically.
+    """Create the project, Trust draft, first Bag, Bag Work and funding atomically.
 
-    The project publishes immediately as LIVE. The first Bag is intentionally DRAFT
-    until its maximum reward obligation has independently verified funding. Any
-    failure in this launch operation rolls the entire launch back so creators are
-    never left with a confusing orphan project from a half-completed wizard.
+    The project publishes immediately as LIVE. The first Bag remains DRAFT until
+    its maximum reward obligation is independently verified; the funding router
+    then promotes a ready DRAFT Bag to LIVE automatically. Any failure here rolls
+    back the entire launch so creators are never left with orphan records.
     """
     try:
         project = Project(
@@ -238,8 +239,8 @@ def launch_project_and_first_bag(
             reward_funding_status=reward_funding_status,
             gas_policies_created=gas_policies_created,
             message=(
-                "Project published. First Bag saved as DRAFT. Verify reward funding "
-                "before the creator publishes the Bag."
+                "Project published. First Bag saved as DRAFT. Once its full reward "
+                "obligation is independently verified it will become live in Bag Work automatically."
             ),
         )
     except HTTPException:

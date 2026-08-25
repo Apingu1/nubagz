@@ -20,6 +20,7 @@ class ProjectTrustEvidence(Base):
     token_launch_date: Mapped[str | None] = mapped_column(String(32), nullable=True)
     docs_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     socials_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    team_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
 
     contract_source_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     dangerous_permissions_absent: Mapped[bool] = mapped_column(Boolean, default=False)

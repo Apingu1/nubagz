@@ -3,6 +3,14 @@ from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from ..bag_lifecycle import (
+    active_work_count,
+    fully_funded,
+    publication_blockers,
+    reconcile_campaign_publication,
+    reconcile_verified_drafts,
+    required_amount,
+)
 from ..db import get_db
 from ..deps import get_current_user, require_admin
 from ..models import Campaign, Project, User
@@ -21,10 +29,6 @@ class FundingVerifyIn(BaseModel):
     tx_hash: str | None = Field(default=None, max_length=255)
 
 
-def required_amount(campaign: Campaign) -> Decimal:
-    return Decimal(campaign.gross_reward_per_user) * Decimal(campaign.max_users)
-
-
 def owner_or_admin(campaign: Campaign, db: Session, user: User):
     project = db.get(Project, campaign.project_id)
     if not project or (project.owner_id != user.id and user.role != "ADMIN"):
@@ -32,8 +36,17 @@ def owner_or_admin(campaign: Campaign, db: Session, user: User):
     return project
 
 
-def payload(campaign: Campaign, funding: CampaignFunding | None):
+def payload(db: Session, campaign: Campaign, funding: CampaignFunding | None):
     required = required_amount(campaign)
+    funded = fully_funded(campaign, funding)
+    work_count = active_work_count(db, campaign.id)
+    blockers = publication_blockers(db, campaign, funding)
+    discoverable = bool(
+        campaign.status == "LIVE"
+        and funded
+        and work_count > 0
+        and not any(code.startswith("PROJECT_") for code in blockers)
+    )
     return {
         "campaign_id": campaign.id,
         "asset": campaign.reward_asset,
@@ -42,7 +55,11 @@ def payload(campaign: Campaign, funding: CampaignFunding | None):
         "verified_amount": str(funding.verified_amount if funding else Decimal("0")),
         "status": funding.status if funding else "UNFUNDED",
         "tx_hash": funding.tx_hash if funding else None,
-        "fully_funded": bool(funding and funding.status == "VERIFIED" and Decimal(funding.verified_amount) >= required),
+        "fully_funded": funded,
+        "campaign_status": campaign.status,
+        "active_work_count": work_count,
+        "discoverable": discoverable,
+        "discoverability_blockers": blockers,
     }
 
 
@@ -53,14 +70,24 @@ def campaign_funding(campaign_id: int, db: Session = Depends(get_db), user: User
         raise HTTPException(404, "Campaign not found")
     owner_or_admin(campaign, db, user)
     funding = db.query(CampaignFunding).filter(CampaignFunding.campaign_id == campaign_id).first()
-    return payload(campaign, funding)
+    if reconcile_campaign_publication(db, campaign, funding):
+        db.commit()
+        db.refresh(campaign)
+    return payload(db, campaign, funding)
 
 
 @router.get("/mine")
 def my_campaign_funding(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     campaigns = db.query(Campaign).join(Project, Project.id == Campaign.project_id).filter(Project.owner_id == user.id).all()
-    funding_by_campaign = {row.campaign_id: row for row in db.query(CampaignFunding).filter(CampaignFunding.campaign_id.in_([c.id for c in campaigns] or [-1])).all()}
-    return [payload(c, funding_by_campaign.get(c.id)) for c in campaigns]
+    campaign_ids = [c.id for c in campaigns]
+    reconcile_verified_drafts(db, campaign_ids)
+    funding_by_campaign = {
+        row.campaign_id: row
+        for row in db.query(CampaignFunding)
+        .filter(CampaignFunding.campaign_id.in_(campaign_ids or [-1]))
+        .all()
+    }
+    return [payload(db, c, funding_by_campaign.get(c.id)) for c in campaigns]
 
 
 @router.post("/campaigns/{campaign_id}/declare")
@@ -81,7 +108,7 @@ def declare_funding(campaign_id: int, data: FundingDeclareIn, db: Session = Depe
     funding.verified_at = None
     db.commit()
     db.refresh(funding)
-    return payload(campaign, funding)
+    return payload(db, campaign, funding)
 
 
 @router.post("/campaigns/{campaign_id}/verify")
@@ -102,6 +129,8 @@ def verify_funding(campaign_id: int, data: FundingVerifyIn, db: Session = Depend
     funding.status = "VERIFIED"
     funding.verified_by_id = admin.id
     funding.verified_at = datetime.now(UTC)
+    reconcile_campaign_publication(db, campaign, funding)
     db.commit()
     db.refresh(funding)
-    return payload(campaign, funding)
+    db.refresh(campaign)
+    return payload(db, campaign, funding)
