@@ -15,12 +15,20 @@ def test_project_trust_requires_admin_verified_evidence_before_score_increases()
         project = next(p for p in client.get('/api/projects/mine', headers=creator).json() if p['status'] in {'LIVE','APPROVED'})
         project_id = project['id']
 
+        profile = client.patch(f'/api/projects/{project_id}/profile', headers=creator, json={
+            'website': 'https://trust-profile.example.com',
+            'treasury_address': '0x2222222222222222222222222222222222222222',
+        })
+        assert profile.status_code == 200
+        assert profile.json()['website'] == 'https://trust-profile.example.com'
+
         submission = client.post('/api/trust/evidence', headers=creator, json={
             'project_id': project_id,
             'contract_address': '0x1111111111111111111111111111111111111111',
             'token_launch_date': '2025-01-01',
             'docs_url': 'https://docs.example.com',
             'socials_url': 'https://social.example.com',
+            'team_url': 'https://example.com/team',
             'contract_source_verified': True,
             'dangerous_permissions_absent': True,
             'liquidity_verified': True,
@@ -34,6 +42,9 @@ def test_project_trust_requires_admin_verified_evidence_before_score_increases()
         before = client.get(f'/api/trust/projects/{project_id}').json()
         assert before['score_version'] == '3.0'
         assert before['evidence']['status'] == 'SUBMITTED'
+        assert before['evidence']['team_url'] == 'https://example.com/team'
+        assert before['project_profile']['website'] == 'https://trust-profile.example.com'
+        assert before['project_profile']['treasury_address'] == '0x2222222222222222222222222222222222222222'
         assert 'approval' not in before['factors']
         assert before['factors']['contract_safety'] == 0
         assert before['factors']['market_structure'] == 0
