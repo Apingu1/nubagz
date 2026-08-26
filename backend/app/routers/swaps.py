@@ -177,6 +177,22 @@ def _validate_transaction(transaction: dict, chain: dict, wallet: WalletConnecti
             raise HTTPException(502, "Swap router returned a transaction for the wrong chain")
 
 
+def _provider_error(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        response = exc.response
+        try:
+            payload = response.json()
+            message = payload.get("message") or payload.get("detail") or payload.get("error")
+            if isinstance(message, dict):
+                message = message.get("message") or json.dumps(message, separators=(",", ":"))
+            if message:
+                return f"HTTP {response.status_code}: {str(message)[:180]}"
+        except Exception:
+            pass
+        return f"HTTP {response.status_code}: {response.text[:180]}"
+    return str(exc)[:220]
+
+
 def _route_sources_0x(payload: dict) -> list[str]:
     seen = []
     for fill in (payload.get("route") or {}).get("fills") or []:
@@ -198,7 +214,7 @@ def _fee_amount_0x(payload: dict):
 
 def _quote_0x(chain: dict, sell_token: str, buy_token: str, sell_amount: str, slippage_bps: int, wallet: WalletConnection) -> dict:
     if not settings.zerox_api_key or not settings.nubagz_swap_fee_recipient:
-        raise RuntimeError("0x not configured")
+        raise RuntimeError("0x is unavailable until ZEROX_API_KEY and NUBAGZ_SWAP_FEE_RECIPIENT are configured")
     if not _valid_evm_address(settings.nubagz_swap_fee_recipient):
         raise RuntimeError("NuBagz 0x fee recipient is invalid")
     params = {
@@ -227,9 +243,8 @@ def _quote_0x(chain: dict, sell_token: str, buy_token: str, sell_amount: str, sl
     issues = payload.get("issues") or {}
     allowance = issues.get("allowance") or {}
     balance = issues.get("balance") or {}
-    if balance.get("actual") is not None and balance.get("expected") is not None:
-        if int(balance["actual"]) < int(balance["expected"]):
-            raise RuntimeError("Verified wallet has insufficient sell-token balance")
+    if balance.get("actual") is not None and balance.get("expected") is not None and int(balance["actual"]) < int(balance["expected"]):
+        raise RuntimeError("Verified wallet has insufficient sell-token balance")
     spender = allowance.get("spender") or payload.get("allowanceTarget")
     return {
         "provider": "0x",
@@ -253,8 +268,8 @@ def _lifi_token(token: str) -> str:
 
 
 def _quote_lifi(chain: dict, sell_token: str, buy_token: str, sell_amount: str, slippage_bps: int, wallet: WalletConnection) -> dict:
-    if not settings.lifi_api_key or not settings.lifi_integrator:
-        raise RuntimeError("LI.FI not configured")
+    if not settings.lifi_integrator:
+        raise RuntimeError("LI.FI integrator is not configured")
     params = {
         "fromChain": chain["chain_id"],
         "toChain": chain["chain_id"],
@@ -268,12 +283,10 @@ def _quote_lifi(chain: dict, sell_token: str, buy_token: str, sell_amount: str, 
         "integrator": settings.lifi_integrator,
         "fee": str(Decimal(settings.swap_fee_bps) / Decimal(10000)),
     }
-    response = httpx.get(
-        "https://li.quest/v1/quote",
-        params=params,
-        headers={"x-lifi-api-key": settings.lifi_api_key},
-        timeout=12.0,
-    )
+    headers = {"Accept": "application/json"}
+    if settings.lifi_api_key:
+        headers["x-lifi-api-key"] = settings.lifi_api_key
+    response = httpx.get("https://li.quest/v1/quote", params=params, headers=headers, timeout=12.0)
     response.raise_for_status()
     payload = response.json()
     estimate = payload.get("estimate") or {}
@@ -376,7 +389,7 @@ def swap_config(db: Session = Depends(get_db), user: User = Depends(get_current_
     ).order_by(WalletConnection.is_primary.desc(), WalletConnection.verified_at.desc()).first()
     providers = {
         "0x": bool(settings.zerox_api_key and settings.nubagz_swap_fee_recipient and _valid_evm_address(settings.nubagz_swap_fee_recipient)),
-        "LI.FI": bool(settings.lifi_api_key and settings.lifi_integrator),
+        "LI.FI": bool(settings.lifi_integrator),
     }
     return {
         "primary_chain": "Robinhood",
@@ -384,29 +397,22 @@ def swap_config(db: Session = Depends(get_db), user: User = Depends(get_current_
         "fee_percent": str(Decimal(settings.swap_fee_bps) / Decimal(100)),
         "wallet_address": wallet.address if wallet else None,
         "providers": providers,
+        "provider_auth": {"0x": "API_KEY_REQUIRED", "LI.FI": "AUTHENTICATED" if settings.lifi_api_key else "PUBLIC_RATE_LIMIT"},
         "ready": any(providers.values()),
         "chains": [{**value, "key": key} for key, value in CHAINS.items()],
-        "execution_model": "Quotes contain NuBagz's disclosed integrator fee. The verified connected wallet signs approvals and swaps directly; NuBagz never has custody of keys or swap funds.",
+        "execution_model": "The receive box shows a market estimate first. Executable quotes include NuBagz's disclosed integrator fee; the verified connected wallet signs approvals and swaps directly, and NuBagz never has custody of keys or swap funds.",
     }
 
 
 @router.get("/token")
-def token_metadata(
-    chain: str = Query(default="Robinhood"),
-    address: str = Query(...),
-    _: User = Depends(get_current_user),
-):
+def token_metadata(chain: str = Query(default="Robinhood"), address: str = Query(...), _: User = Depends(get_current_user)):
     key, chain_spec = _chain(chain)
     token = _normalise_token(address, chain_spec)
     return _token_metadata(key, token)
 
 
 @router.get("/token-search")
-def token_search(
-    chain: str = Query(default="Robinhood"),
-    q: str = Query(min_length=1, max_length=100),
-    _: User = Depends(get_current_user),
-):
+def token_search(chain: str = Query(default="Robinhood"), q: str = Query(min_length=1, max_length=100), _: User = Depends(get_current_user)):
     key, chain_spec = _chain(chain)
     text = q.strip()
     if _valid_evm_address(text):
@@ -447,11 +453,7 @@ def token_search(
 
 
 @router.get("/market")
-def market_data(
-    chain: str = Query(default="Robinhood"),
-    token: str = Query(...),
-    _: User = Depends(get_current_user),
-):
+def market_data(chain: str = Query(default="Robinhood"), token: str = Query(...), _: User = Depends(get_current_user)):
     _, chain_spec = _chain(chain)
     target = _normalise_token(token, chain_spec)
     if target.lower() == NATIVE_TOKEN and chain_spec.get("wrapped_native"):
@@ -505,11 +507,7 @@ def market_data(
 
 
 @router.post("/quote")
-def quote_routes(
-    data: QuoteIn,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
+def quote_routes(data: QuoteIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     _, chain = _chain(data.chain)
     wallet = _verified_wallet(db, user)
     sell_token = _normalise_token(data.sell_token, chain)
@@ -538,10 +536,11 @@ def quote_routes(
             route["nubagz_fee_bps"] = settings.swap_fee_bps
             routes.append(route)
         except Exception as exc:
-            errors[name] = str(exc)[:240]
+            errors[name] = _provider_error(exc)
     if not routes:
         db.rollback()
-        raise HTTPException(503, "No executable fee-enabled swap route is currently available. Configure 0x and/or LI.FI integration credentials and the NuBagz fee recipient.")
+        reason = "; ".join(f"{name}: {message}" for name, message in errors.items())
+        raise HTTPException(503, f"No executable fee-enabled route is available for this pair right now. {reason}"[:700])
     routes.sort(key=lambda x: int(x["buy_amount"]), reverse=True)
     db.commit()
     routes[0]["recommended"] = True
@@ -563,11 +562,7 @@ def quote_routes(
 
 
 @router.post("/confirm")
-def confirm_swap(
-    data: ConfirmIn,
-    db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
+def confirm_swap(data: ConfirmIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
     if not _valid_tx_hash(data.tx_hash):
         raise HTTPException(400, "Invalid transaction hash")
     row = db.query(SwapTrade).filter(SwapTrade.id == data.session_id, SwapTrade.user_id == user.id).first()
