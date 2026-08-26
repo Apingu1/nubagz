@@ -17,8 +17,8 @@ from ..integration_models import GasSponsorshipClaim, GasSponsorshipPolicy
 from ..models import Campaign, Enrollment, Project, User, WalletConnection
 
 router = APIRouter(prefix="/api/gas", tags=["sponsored-gas"])
-SUPPORTED = {"avalanche": "AVAX", "ethereum": "ETH", "base": "ETH", "arbitrum": "ETH", "polygon": "POL"}
-CHAIN_IDS = {"avalanche": 43114, "ethereum": 1, "base": 8453, "arbitrum": 42161, "polygon": 137}
+SUPPORTED = {"robinhood": "ETH", "avalanche": "AVAX", "ethereum": "ETH", "base": "ETH", "arbitrum": "ETH", "polygon": "POL"}
+CHAIN_IDS = {"robinhood": 4663, "avalanche": 43114, "ethereum": 1, "base": 8453, "arbitrum": 42161, "polygon": 137}
 ACTIVE_CLAIM_STATUSES = {"RESERVED", "EXECUTED"}
 PUBLIC_PROJECT_STATUSES = {"LIVE", "APPROVED"}
 
@@ -64,6 +64,11 @@ def _valid_tx_hash(value: object) -> bool:
         return True
     except ValueError:
         return False
+
+
+def _chain_key(value: str) -> str:
+    key = value.strip().lower()
+    return "robinhood" if key == "robinhood chain" else key
 
 
 def _verified_wallet(db: Session, user: User):
@@ -187,7 +192,7 @@ def _build_transaction(challenge: Challenge, chain: str):
         raise HTTPException(409, "This sponsored activity has invalid configured transaction value") from exc
     if value_int < 0:
         raise HTTPException(409, "This sponsored activity has invalid configured transaction value")
-    key = chain.strip().lower()
+    key = _chain_key(chain)
     if key not in CHAIN_IDS:
         raise HTTPException(409, "This sponsored activity uses an unsupported EVM chain")
     return {"to": target, "data": data, "value": hex(value_int), "chainId": CHAIN_IDS[key]}

@@ -117,7 +117,7 @@ class ProjectCreate(BaseModel):
     symbol: str = Field(min_length=1, max_length=24)
     description: str = Field(min_length=20, max_length=5000)
     website: str | None = None
-    chain: str = "Avalanche"
+    chain: str = "Robinhood"
     logo_url: str | None = None
     treasury_address: str | None = None
 
@@ -246,11 +246,11 @@ class ChallengeCreate(BaseModel):
             self.target_id = None
 
         if self.category == "ONCHAIN" and self.verification_type == "AUTO":
-            supported = {"avalanche", "ethereum", "base", "arbitrum", "polygon"}
+            supported = {"robinhood", "avalanche", "ethereum", "base", "arbitrum", "polygon"}
             chain = str(self.config.get("chain") or "").strip()
             target = str(self.config.get("target_address") or self.target_id or "").strip()
             if chain.lower() not in supported:
-                raise ValueError("Automatic on-chain verification supports Avalanche, Ethereum, Base, Arbitrum and Polygon")
+                raise ValueError("Automatic on-chain verification supports Robinhood, Avalanche, Ethereum, Base, Arbitrum and Polygon")
             if not (target.startswith("0x") and len(target) == 42):
                 raise ValueError("Automatic on-chain Bag Work requires a 20-byte EVM target address")
             try:

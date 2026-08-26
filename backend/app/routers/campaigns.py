@@ -17,6 +17,7 @@ from .risk import evaluate_user
 router = APIRouter(prefix="/api/campaigns", tags=["campaigns"])
 PUBLIC_PROJECT_STATUSES = {"LIVE", "APPROVED"}
 GAS_NATIVE = {
+    "robinhood": "ETH",
     "avalanche": "AVAX",
     "ethereum": "ETH",
     "base": "ETH",
@@ -145,13 +146,16 @@ def create_campaign(
         gas = challenge_data.gas_sponsorship
         if gas and gas.enabled:
             chain = gas.chain.strip().lower()
+            if chain == "robinhood chain":
+                chain = "robinhood"
             if chain not in GAS_NATIVE:
-                raise HTTPException(400, "Gas Pass currently supports Avalanche, Ethereum, Base, Arbitrum and Polygon")
+                raise HTTPException(400, "Gas Pass currently supports Robinhood, Avalanche, Ethereum, Base, Arbitrum and Polygon")
+            stored_chain = "Robinhood" if chain == "robinhood" else gas.chain.strip().title()
             db.add(GasSponsorshipPolicy(
                 challenge_id=challenge.id,
                 project_id=project.id,
                 created_by_id=user.id,
-                chain=gas.chain.strip().title(),
+                chain=stored_chain,
                 native_asset=GAS_NATIVE[chain],
                 max_native_per_claim=gas.max_native_per_claim,
                 max_unique_users=gas.max_unique_users,
