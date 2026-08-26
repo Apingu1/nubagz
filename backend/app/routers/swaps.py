@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..db import get_db
 from ..deps import get_current_user
-from ..integration_models import SwapIntent
+from ..integration_models import SwapTrade
 from ..models import User, WalletConnection
 from .onchain import rpc_call
 
@@ -307,18 +307,19 @@ def _quote_lifi(chain: dict, sell_token: str, buy_token: str, sell_amount: str, 
 
 
 def _store_route(db: Session, user: User, wallet: WalletConnection, chain: dict, data: QuoteIn, sell_token: str, buy_token: str, route: dict) -> int:
-    row = SwapIntent(
+    row = SwapTrade(
         user_id=user.id,
         wallet_connection_id=wallet.id,
         chain=chain["name"],
+        chain_id=chain["chain_id"],
         sell_asset=sell_token,
         buy_asset=buy_token,
-        sell_amount=Decimal(data.sell_amount),
+        sell_amount_raw=data.sell_amount,
+        quoted_buy_amount_raw=route["buy_amount"],
         max_slippage_bps=data.slippage_bps,
         status="QUOTED",
         provider_name=route["provider"],
         provider_quote_id=route.get("provider_quote_id") or None,
-        quoted_buy_amount=Decimal(route["buy_amount"]),
         quote_expires_at=datetime.now(UTC) + timedelta(seconds=90),
         transaction_payload=json.dumps(route, separators=(",", ":")),
     )
@@ -327,7 +328,7 @@ def _store_route(db: Session, user: User, wallet: WalletConnection, chain: dict,
     return row.id
 
 
-def _session_payload(row: SwapIntent, wallet: WalletConnection):
+def _session_payload(row: SwapTrade, wallet: WalletConnection):
     details = json.loads(row.transaction_payload) if row.transaction_payload else {}
     receipt = details.get("receipt") or {}
     return {
@@ -337,10 +338,10 @@ def _session_payload(row: SwapIntent, wallet: WalletConnection):
         "status": row.status,
         "sell_token": row.sell_asset,
         "buy_token": row.buy_asset,
-        "sell_amount": str(row.sell_amount),
-        "quoted_buy_amount": str(row.quoted_buy_amount) if row.quoted_buy_amount is not None else None,
+        "sell_amount": row.sell_amount_raw,
+        "quoted_buy_amount": row.quoted_buy_amount_raw,
         "wallet_address": wallet.address,
-        "tx_hash": details.get("tx_hash"),
+        "tx_hash": row.tx_hash or details.get("tx_hash"),
         "actual_buy_amount": receipt.get("actual_buy_amount"),
         "block_number": receipt.get("block_number"),
         "gas_used": receipt.get("gas_used"),
@@ -569,7 +570,7 @@ def confirm_swap(
 ):
     if not _valid_tx_hash(data.tx_hash):
         raise HTTPException(400, "Invalid transaction hash")
-    row = db.query(SwapIntent).filter(SwapIntent.id == data.session_id, SwapIntent.user_id == user.id).first()
+    row = db.query(SwapTrade).filter(SwapTrade.id == data.session_id, SwapTrade.user_id == user.id).first()
     if not row:
         raise HTTPException(404, "Swap session not found")
     wallet = db.get(WalletConnection, row.wallet_connection_id)
@@ -577,8 +578,7 @@ def confirm_swap(
         raise HTTPException(409, "The verified wallet for this swap is no longer available")
     details = json.loads(row.transaction_payload) if row.transaction_payload else {}
     expected = details.get("transaction") or {}
-    existing_hash = details.get("tx_hash")
-    if existing_hash and str(existing_hash).lower() != data.tx_hash.lower():
+    if row.tx_hash and row.tx_hash.lower() != data.tx_hash.lower():
         raise HTTPException(409, "This swap session is already bound to a different wallet transaction")
     receipt = rpc_call(row.chain, "eth_getTransactionReceipt", [data.tx_hash])
     tx = rpc_call(row.chain, "eth_getTransactionByHash", [data.tx_hash])
@@ -594,10 +594,9 @@ def confirm_swap(
         raise HTTPException(400, "Swap transaction calldata does not match the selected executable route")
     if _quantity_int(tx.get("value")) != _quantity_int(expected.get("value")):
         raise HTTPException(400, "Swap transaction value does not match the selected executable route")
-    details["tx_hash"] = data.tx_hash
+    row.tx_hash = data.tx_hash.lower()
     if not receipt:
         row.status = "SUBMITTED"
-        row.transaction_payload = json.dumps(details, separators=(",", ":"))
         db.commit()
         return {"status": "SUBMITTED", "tx_hash": data.tx_hash, "confirmed": False}
     success = int(receipt.get("status", "0x0"), 16) == 1
@@ -618,7 +617,7 @@ def confirm_swap(
         "confirmed": success,
         "tx_hash": data.tx_hash,
         "actual_buy_amount": actual,
-        "quoted_buy_amount": str(row.quoted_buy_amount) if row.quoted_buy_amount is not None else None,
+        "quoted_buy_amount": row.quoted_buy_amount_raw,
         "block_number": details["receipt"]["block_number"],
         "gas_used": details["receipt"]["gas_used"],
         "explorer_url": f"{chain['explorer']}/tx/{data.tx_hash}",
@@ -627,10 +626,10 @@ def confirm_swap(
 
 @router.get("/history")
 def swap_history(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = db.query(SwapIntent).filter(
-        SwapIntent.user_id == user.id,
-        SwapIntent.status.in_(["SUBMITTED", "CONFIRMED", "FAILED"]),
-    ).order_by(SwapIntent.updated_at.desc()).limit(50).all()
+    rows = db.query(SwapTrade).filter(
+        SwapTrade.user_id == user.id,
+        SwapTrade.status.in_(["SUBMITTED", "CONFIRMED", "FAILED"]),
+    ).order_by(SwapTrade.updated_at.desc()).limit(50).all()
     out = []
     for row in rows:
         wallet = db.get(WalletConnection, row.wallet_connection_id)
