@@ -58,14 +58,11 @@ def test_creator_launch_is_atomic_and_builds_project_trust_first_bag_work_access
         funding=next(f for f in client.get('/api/funding/mine',headers=creator).json() if f['campaign_id']==cid)
         assert funding['status']=='DECLARED' and funding['fully_funded'] is False
 
-        # Creator cannot publish until the objective reward funding gate passes.
         assert client.post(f'/api/campaigns/{cid}/publish',headers=creator).status_code==409
         verified=client.post(f'/api/funding/campaigns/{cid}/verify',headers=admin,json={'amount':200,'tx_hash':'ucflow-verified-funding'})
         assert verified.status_code==200 and verified.json()['fully_funded'] is True
         published=client.post(f'/api/campaigns/{cid}/publish',headers=creator);assert published.status_code==200 and published.json()['status']=='LIVE'
 
-        # Force a failure after project/Bag records have been flushed: unsupported
-        # gas chain must roll the entire launch back rather than leaving an orphan.
         failing_name='Atomic Rollback Project'
         bad_challenge={'title':'Unsupported sponsored transaction','description':'This deliberately invalid gas provider chain proves the whole creator launch rolls back.','category':'ONCHAIN','verification_type':'AUTO','target_id':'0x1111111111111111111111111111111111111111','config':{'target_address':'0x1111111111111111111111111111111111111111','calldata':'0x','value_wei':'0','chain':'Avalanche'},'xp_reward':10,'gas_sponsorship':{'enabled':True,'chain':'Solana','max_native_per_claim':0.01,'max_unique_users':10,'max_claims':10,'max_claims_per_wallet':1,'funded_amount':0.02,'funding_reference':'rollback-gas'}}
         failed=client.post('/api/creator/launch',headers=creator,json=launch_payload(failing_name,'ROLLBK',bad_challenge,max_users=1,allocation=10,gross=10))
@@ -73,13 +70,11 @@ def test_creator_launch_is_atomic_and_builds_project_trust_first_bag_work_access
         assert all(p['name']!=failing_name for p in client.get('/api/projects/mine',headers=creator).json())
 
 
-def test_unified_onchain_auto_verification_accepts_sponsored_or_user_paid_tx_hash_and_prevents_replay(monkeypatch):
+def test_unified_onchain_auto_verification_requires_join_accepts_tx_hash_and_prevents_replay(monkeypatch):
     with TestClient(app) as client:
         creator=login(client,'creator@demo.nubagz.com','Creator123!');admin=login(client,'admin@demo.nubagz.com','Admin123!')
         target='0x1111111111111111111111111111111111111111';calldata='0x1234'
         challenge={'title':'Verified Avalanche action','description':'Complete the exact configured transaction and let NuBagz verify the chain result automatically.','category':'ONCHAIN','verification_type':'AUTO','target_id':target,'config':{'target_address':target,'calldata':calldata,'value_wei':'0','chain':'Avalanche'},'xp_reward':25}
-        # This test isolates automatic on-chain verification. BagScore gating is
-        # covered separately by the creator launch/access assertions above.
         created=client.post('/api/creator/launch',headers=creator,json=launch_payload('Unified Onchain Flow','UONCH',challenge,max_users=2,allocation=20,gross=10,min_bag_score=0));assert created.status_code==200
         cid=created.json()['campaign_id'];challenge_id=next(c for c in client.get('/api/campaigns/mine',headers=creator).json() if c['id']==cid)['challenges'][0]['id']
         assert client.post(f'/api/funding/campaigns/{cid}/verify',headers=admin,json={'amount':20,'tx_hash':'uonch-verified'}).status_code==200
@@ -96,9 +91,13 @@ def test_unified_onchain_auto_verification_accepts_sponsored_or_user_paid_tx_has
             raise AssertionError(method)
         monkeypatch.setattr(challenge_router,'rpc_call',fake_rpc)
 
+        blocked=client.post(f'/api/challenges/{challenge_id}/complete',headers=first,json={'answer':None,'evidence':tx_hash})
+        assert blocked.status_code==400 and 'join this bag' in blocked.json()['detail'].lower()
+        assert client.post(f'/api/campaigns/{cid}/enroll',headers=first).status_code==200
+        assert client.post(f'/api/campaigns/{cid}/enroll',headers=second).status_code==200
+
         completed=client.post(f'/api/challenges/{challenge_id}/complete',headers=first,json={'answer':None,'evidence':tx_hash})
         assert completed.status_code==200 and completed.json()['status']=='VERIFIED' and completed.json()['completed'] is True
 
-        # The same public transaction cannot be replayed by another NuBagz user.
         replay=client.post(f'/api/challenges/{challenge_id}/complete',headers=second,json={'answer':None,'evidence':tx_hash})
         assert replay.status_code in {400,409}
