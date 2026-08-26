@@ -1,9 +1,15 @@
+import json
+
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from fastapi.testclient import TestClient
 
 from app.main import app
 from app.config import settings
+from app.db import SessionLocal
+from app.integration_models import SwapTrade
+from app.models import WalletConnection
+from app.routers import swaps as swaps_router
 
 USDG='0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168'
 NATIVE='0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
@@ -58,3 +64,77 @@ def test_swap_requires_verified_wallet_and_never_fabricates_execution_without_ag
         settings.zerox_api_key=original_0x
         settings.lifi_api_key=original_lifi
         settings.nubagz_swap_fee_recipient=original_recipient
+
+
+def test_confirmed_swap_is_bound_to_exact_server_quote_and_raw_amounts_are_precision_safe(monkeypatch):
+    with TestClient(app) as client:
+        user_res=client.post('/api/auth/register',json={'email':'feature23-receipt@example.com','username':'Feature23Receipt','password':'Swaps123!'})
+        assert user_res.status_code==200
+        headers={'Authorization':f"Bearer {user_res.json()['access_token']}"}
+        user_id=user_res.json()['user']['id']
+        account=Account.create();verify_wallet(client,headers,account)
+
+        db=SessionLocal()
+        try:
+            wallet=db.query(WalletConnection).filter(WalletConnection.user_id==user_id,WalletConnection.verified_at.isnot(None)).first()
+            assert wallet is not None
+            huge_raw='1000000000000000000000000000000'
+            expected_to='0x1111111111111111111111111111111111111111'
+            route={
+                'provider':'test-router',
+                'buy_amount':'2500000',
+                'min_buy_amount':'2400000',
+                'transaction':{'to':expected_to,'data':'0x1234','value':'0x0','chainId':4663},
+            }
+            row=SwapTrade(
+                user_id=user_id,
+                wallet_connection_id=wallet.id,
+                chain='Robinhood',
+                chain_id=4663,
+                sell_asset=NATIVE,
+                buy_asset=USDG,
+                sell_amount_raw=huge_raw,
+                quoted_buy_amount_raw='2500000',
+                max_slippage_bps=100,
+                status='QUOTED',
+                provider_name='test-router',
+                provider_quote_id='test-quote',
+                transaction_payload=json.dumps(route,separators=(',',':')),
+            )
+            db.add(row);db.commit();db.refresh(row);session_id=row.id
+        finally:
+            db.close()
+
+        bad_hash='0x'+'1'*64
+        good_hash='0x'+'2'*64
+
+        def fake_rpc(chain,method,params):
+            tx_hash=params[0]
+            if method=='eth_getTransactionReceipt':
+                return {'status':'0x1','blockNumber':'0x10','gasUsed':'0x5208','effectiveGasPrice':'0x1','logs':[]}
+            if method=='eth_getTransactionByHash':
+                return {
+                    'from':account.address,
+                    'to':expected_to,
+                    'input':'0xabcd' if tx_hash==bad_hash else '0x1234',
+                    'value':'0x0',
+                }
+            raise AssertionError(method)
+
+        monkeypatch.setattr(swaps_router,'rpc_call',fake_rpc)
+
+        mismatch=client.post('/api/swaps/confirm',headers=headers,json={'session_id':session_id,'tx_hash':bad_hash})
+        assert mismatch.status_code==400
+        assert 'calldata' in mismatch.json()['detail'].lower()
+
+        confirmed=client.post('/api/swaps/confirm',headers=headers,json={'session_id':session_id,'tx_hash':good_hash})
+        assert confirmed.status_code==200
+        assert confirmed.json()['status']=='CONFIRMED' and confirmed.json()['confirmed'] is True
+        assert confirmed.json()['quoted_buy_amount']=='2500000'
+
+        history=client.get('/api/swaps/history',headers=headers)
+        assert history.status_code==200
+        row=next(item for item in history.json() if item['session_id']==session_id)
+        assert row['sell_amount']==huge_raw
+        assert row['quoted_buy_amount']=='2500000'
+        assert row['tx_hash']==good_hash
