@@ -29,9 +29,11 @@ def balances(client,headers):
 def test_swap_requires_verified_wallet_and_never_fabricates_execution_without_aggregators():
     original_0x=settings.zerox_api_key
     original_lifi=settings.lifi_api_key
+    original_integrator=settings.lifi_integrator
     original_recipient=settings.nubagz_swap_fee_recipient
     settings.zerox_api_key=None
     settings.lifi_api_key=None
+    settings.lifi_integrator=''
     settings.nubagz_swap_fee_recipient=None
     try:
         with TestClient(app) as client:
@@ -55,7 +57,7 @@ def test_swap_requires_verified_wallet_and_never_fabricates_execution_without_ag
             before=balances(client,headers)
             no_route=client.post('/api/swaps/quote',headers=headers,json={'chain':'Robinhood','sell_token':NATIVE,'buy_token':USDG,'sell_amount':'1000000000000000','slippage_bps':100})
             assert no_route.status_code==503
-            assert 'no executable fee-enabled swap route' in no_route.json()['detail'].lower()
+            assert 'no executable fee-enabled route' in no_route.json()['detail'].lower()
             after=balances(client,headers)
             assert after==before
             history=client.get('/api/swaps/history',headers=headers)
@@ -63,7 +65,56 @@ def test_swap_requires_verified_wallet_and_never_fabricates_execution_without_ag
     finally:
         settings.zerox_api_key=original_0x
         settings.lifi_api_key=original_lifi
+        settings.lifi_integrator=original_integrator
         settings.nubagz_swap_fee_recipient=original_recipient
+
+
+def test_lifi_public_quote_does_not_require_api_key(monkeypatch):
+    original_key=settings.lifi_api_key
+    original_integrator=settings.lifi_integrator
+    settings.lifi_api_key=None
+    settings.lifi_integrator='nubagz'
+    captured={}
+
+    class Response:
+        status_code=200
+        text=''
+        def raise_for_status(self): return None
+        def json(self):
+            return {
+                'id':'public-lifi-quote',
+                'estimate':{'toAmount':'990000','toAmountMin':'980000','approvalAddress':None,'gasCosts':[],'feeCosts':[{'name':'integrator fee','amount':'7500'}]},
+                'transactionRequest':{'from':captured['wallet'],'to':'0x1111111111111111111111111111111111111111','chainId':4663,'data':'0x1234','value':'0x0'},
+                'tool':'test-dex',
+            }
+
+    def fake_get(url,params=None,headers=None,timeout=None):
+        assert url=='https://li.quest/v1/quote'
+        captured['headers']=headers
+        captured['params']=params
+        return Response()
+
+    monkeypatch.setattr(swaps_router.httpx,'get',fake_get)
+    try:
+        with TestClient(app) as client:
+            user_res=client.post('/api/auth/register',json={'email':'feature23-public-lifi@example.com','username':'Feature23PublicLifi','password':'Swaps123!'})
+            headers={'Authorization':f"Bearer {user_res.json()['access_token']}"}
+            account=Account.create();verify_wallet(client,headers,account);captured['wallet']=account.address
+            config=client.get('/api/swaps/config',headers=headers).json()
+            assert config['providers']['LI.FI'] is True
+            assert config['provider_auth']['LI.FI']=='PUBLIC_RATE_LIMIT'
+            route=swaps_router._quote_lifi(swaps_router.CHAINS['robinhood'],NATIVE,USDG,'1000000000000000',100,SessionWallet(account.address))
+            assert route['provider']=='LI.FI' and route['buy_amount']=='990000'
+            assert 'x-lifi-api-key' not in captured['headers']
+            assert captured['params']['fee']=='0.0075'
+    finally:
+        settings.lifi_api_key=original_key
+        settings.lifi_integrator=original_integrator
+
+
+class SessionWallet:
+    def __init__(self,address):
+        self.address=address
 
 
 def test_confirmed_swap_is_bound_to_exact_server_quote_and_raw_amounts_are_precision_safe(monkeypatch):
