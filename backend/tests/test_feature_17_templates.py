@@ -7,13 +7,15 @@ def login(client,email,password):
     return {'Authorization':f"Bearer {r.json()['access_token']}"}
 
 
-def test_campaign_templates_reuse_structure_without_bypassing_funding_publish_or_onchain_rules():
+def test_campaign_templates_reuse_unified_challenges_without_bypassing_funding_or_onchain_rules():
     with TestClient(app) as client:
         creator=login(client,'creator@demo.nubagz.com','Creator123!')
         templates=client.get('/api/templates',headers=creator);assert templates.status_code==200
         systems=[t for t in templates.json() if t['is_system']]
         assert len(systems)>=2
         template=systems[0]
+        assert template['challenges'] and all('category' in item for item in template['challenges'])
+        assert all(item['verification_type']!='SELF_ATTEST' for item in template['challenges'])
         project=next(p for p in client.get('/api/projects/mine',headers=creator).json() if p['status'] in {'LIVE','APPROVED'})
 
         under=client.post(f"/api/templates/{template['id']}/instantiate",headers=creator,json={'project_id':project['id'],'title':'Underfunded Template Bag','reward_asset':'TMP17','token_allocation':99,'gross_reward_per_user':10,'max_users':10})
@@ -23,31 +25,43 @@ def test_campaign_templates_reuse_structure_without_bypassing_funding_publish_or
         assert created.status_code==200
         out=created.json();cid=out['id']
         assert out['status']=='DRAFT' and out['funding_status']=='UNFUNDED'
-        assert out['missions_created']==len(template['missions']) and out['onchain_rules_created']==0
+        assert out['challenges_created']==len(template['challenges']) and out['missions_created']==0
         blocked=client.post(f'/api/campaigns/{cid}/publish',headers=creator)
         assert blocked.status_code==409 and 'funding' in blocked.json()['detail'].lower()
 
-        # Add a stronger verification rule to the source campaign before saving it.
-        source_mission=client.get(f'/api/campaigns/{cid}').json()['missions'][0]
-        rule=client.post('/api/onchain/rules',headers=creator,json={'mission_id':source_mission['id'],'chain':'Avalanche','rule_type':'CONTRACT_INTERACTION','contract_address':'0x1111111111111111111111111111111111111111','token_decimals':18})
-        assert rule.status_code==200
+        # Create a reusable source whose on-chain rule is expressed directly as
+        # a unified ONCHAIN Challenge instead of the retired Mission-rule table.
+        target='0x1111111111111111111111111111111111111111'
+        source=client.post('/api/campaigns',headers=creator,json={
+            'project_id':project['id'],'title':'Feature Seventeen Onchain Source',
+            'description':'A reusable Robinhood Chain template source proving on-chain target rules survive cloning.',
+            'category':'LEARN','difficulty':'EASY','reward_asset':'TMP17','funding_type':'TOKEN','token_allocation':100,
+            'gross_reward_per_user':10,'user_share_pct':80,'nubagz_share_pct':15,'referral_share_pct':5,'max_users':10,
+            'missions':[],'challenges':[{'title':'Robinhood interaction','description':'Interact with the configured Robinhood Chain target.','category':'ONCHAIN','verification_type':'AUTO','target_id':target,'config':{'chain':'Robinhood','target_address':target,'calldata':'0x','value_wei':'0'},'xp_reward':25}]
+        })
+        assert source.status_code==200
+        source_id=source.json()['id']
 
-        custom=client.post('/api/templates/from-campaign',headers=creator,json={'campaign_id':cid,'name':'Feature17 reusable','description':'A creator-owned reusable template copied from the draft campaign structure.'})
+        custom=client.post('/api/templates/from-campaign',headers=creator,json={'campaign_id':source_id,'name':'Feature17 reusable','description':'A creator-owned reusable template copied from unified Challenge structure.'})
         assert custom.status_code==200 and custom.json()['is_system'] is False
         assert custom.json()['onchain_rule_count']==1
         listing=client.get('/api/templates',headers=creator).json()
         saved=next(t for t in listing if t['id']==custom.json()['id'])
         assert saved['name']=='Feature17 reusable' and saved['onchain_rule_count']==1
-        assert saved['missions'][0]['onchain_rule']['rule_type']=='CONTRACT_INTERACTION'
+        assert saved['challenges'][0]['category']=='ONCHAIN'
+        assert saved['challenges'][0]['target_id']==target
+        assert saved['challenges'][0]['config']['chain']=='Robinhood'
 
-        # Instantiating the creator template preserves the rule but never carries verified funding or live state.
+        # Instantiating preserves the unified target/config but never carries
+        # verified funding, a legacy Mission rule or live state.
         cloned=client.post(f"/api/templates/{custom.json()['id']}/instantiate",headers=creator,json={'project_id':project['id'],'title':'Feature Seventeen Cloned Bag','reward_asset':'TMP17','token_allocation':100,'gross_reward_per_user':10,'max_users':10})
         assert cloned.status_code==200
-        clone=cloned.json();assert clone['status']=='DRAFT' and clone['funding_status']=='UNFUNDED' and clone['onchain_rules_created']==1
+        clone=cloned.json();assert clone['status']=='DRAFT' and clone['funding_status']=='UNFUNDED'
+        assert clone['challenges_created']==1 and clone['missions_created']==0 and clone['onchain_rules_created']==0
         clone_campaign=client.get(f"/api/campaigns/{clone['id']}").json()
-        clone_mission=clone_campaign['missions'][0]
-        mine=client.get('/api/onchain/mine',headers=creator);assert mine.status_code==200
-        cloned_rule=next(r for r in mine.json() if r['mission_id']==clone_mission['id'])
-        assert cloned_rule['rule_type']=='CONTRACT_INTERACTION'
-        assert cloned_rule['contract_address']=='0x1111111111111111111111111111111111111111'
+        clone_challenge=clone_campaign['challenges'][0]
+        assert clone_challenge['category']=='ONCHAIN'
+        assert clone_challenge['target_id']==target
+        assert clone_challenge['config']['chain']=='Robinhood'
+        assert clone_challenge['config']['target_address']==target
         assert client.post(f"/api/campaigns/{clone['id']}/publish",headers=creator).status_code==409

@@ -13,12 +13,12 @@ def earnings_for(payload, asset):
 
 def complete_one_step(client, headers, campaign_id):
     assert client.post(f'/api/campaigns/{campaign_id}/enroll',headers=headers).status_code==200
-    mission=client.get(f'/api/campaigns/{campaign_id}').json()['missions'][0]
-    result=client.post(f"/api/campaigns/{campaign_id}/missions/{mission['id']}/complete",headers=headers,json={'answer':None})
+    challenge=client.get(f'/api/campaigns/{campaign_id}').json()['challenges'][0]
+    result=client.post(f"/api/challenges/{challenge['id']}/complete",headers=headers,json={'answer':'participate'})
     assert result.status_code==200 and result.json()['completed'] is True
 
 
-def test_referrals_pay_only_for_funded_conversions_and_reviewed_rewards_redirect():
+def test_referrals_pay_only_for_funded_challenge_conversions_and_reviewed_rewards_redirect():
     with TestClient(app) as client:
         creator=login(client,'creator@demo.nubagz.com','Creator123!')
         admin=login(client,'admin@demo.nubagz.com','Admin123!')
@@ -47,15 +47,15 @@ def test_referrals_pay_only_for_funded_conversions_and_reviewed_rewards_redirect
         assert earnings_for(after_signup.json(),'REF10')==before_reward
         assert after_signup.json()['pending_users']>=2
 
-        project=client.post('/api/projects',headers=creator,json={'name':'Feature Ten Referrals','symbol':'REF10','description':'An isolated funded project used to prove performance based referral economics.','chain':'Avalanche'})
+        project=client.post('/api/projects',headers=creator,json={'name':'Feature Ten Referrals','symbol':'REF10','description':'An isolated funded Robinhood project used to prove performance based referral economics.','chain':'Robinhood'})
         assert project.status_code==200
         pid=project.json()['id']
         assert client.patch(f'/api/admin/projects/{pid}',headers=admin,json={'status':'APPROVED'}).status_code==200
         campaign=client.post('/api/campaigns',headers=creator,json={
-            'project_id':pid,'title':'Referral Conversion Bag','description':'A funded one-step Bag used to validate referral economics after real participation.',
+            'project_id':pid,'title':'Referral Conversion Bag','description':'A funded one-step Challenge Bag used to validate referral economics after real participation.',
             'category':'LEARN','difficulty':'EASY','reward_asset':'REF10','funding_type':'TOKEN','token_allocation':200,
             'gross_reward_per_user':100,'user_share_pct':80,'nubagz_share_pct':15,'referral_share_pct':5,'max_users':2,
-            'missions':[{'title':'Participate','description':'Complete the funded referral pathway','mission_type':'LEARN','verification_type':'SELF_ATTEST','xp_reward':10}]
+            'missions':[],'challenges':[{'title':'Participate','description':'Complete the funded referral pathway quiz.','category':'LEARN','verification_type':'QUIZ','config':{'answer':'participate'},'xp_reward':10}]
         })
         assert campaign.status_code==200
         cid=campaign.json()['id']
