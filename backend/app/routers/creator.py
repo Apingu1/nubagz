@@ -1,4 +1,4 @@
-from datetime import date, datetime, UTC
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -11,7 +11,7 @@ from ..db import get_db
 from ..deps import get_current_user
 from ..economy_models import CampaignAccessRule, CampaignFunding
 from ..integration_models import GasSponsorshipPolicy
-from ..models import Campaign, Mission, Project, User
+from ..models import Campaign, Project, User
 from ..schemas import CampaignCreate, ProjectCreate
 from ..trust_models import ProjectTrustEvidence
 from ..utils import slugify
@@ -53,8 +53,7 @@ class ProjectTrustDraft(BaseModel):
         return self
 
     def has_content(self) -> bool:
-        values = self.model_dump().values()
-        return any(value not in {None, "", False} for value in values)
+        return any(value not in {None, "", False} for value in self.model_dump().values())
 
 
 class RewardFundingDraft(BaseModel):
@@ -102,10 +101,7 @@ def _create_gas_policy(
 ) -> GasSponsorshipPolicy:
     chain_key = gas.chain.strip().lower()
     if chain_key not in GAS_NATIVE:
-        raise HTTPException(
-            400,
-            "Gas Pass currently supports Avalanche, Ethereum, Base, Arbitrum and Polygon",
-        )
+        raise HTTPException(400, "Gas Pass currently supports Avalanche, Ethereum, Base, Arbitrum and Polygon")
     policy = GasSponsorshipPolicy(
         challenge_id=challenge.id,
         project_id=project.id,
@@ -133,13 +129,7 @@ def launch_project_and_first_bag(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Create the project, Trust draft, first Bag, Bag Work and funding atomically.
-
-    The project publishes immediately as LIVE. The first Bag remains DRAFT until
-    its maximum reward obligation is independently verified; the funding router
-    then promotes a ready DRAFT Bag to LIVE automatically. Any failure here rolls
-    back the entire launch so creators are never left with orphan records.
-    """
+    """Create a project, Trust draft, first Bag and unified Bag Work atomically."""
     try:
         project = Project(
             owner_id=user.id,
@@ -164,25 +154,10 @@ def launch_project_and_first_bag(
             db.add(evidence)
             trust_status = "SUBMITTED"
 
-        bag_values = data.bag.model_dump(
-            exclude={"project_id", "missions", "challenges"}
-        )
-        campaign = Campaign(
-            project_id=project.id,
-            status="DRAFT",
-            **bag_values,
-        )
+        bag_values = data.bag.model_dump(exclude={"project_id", "missions", "challenges"})
+        campaign = Campaign(project_id=project.id, status="DRAFT", **bag_values)
         db.add(campaign)
         db.flush()
-
-        for index, mission_data in enumerate(data.bag.missions):
-            db.add(
-                Mission(
-                    campaign_id=campaign.id,
-                    position=index,
-                    **mission_data.model_dump(),
-                )
-            )
 
         gas_policies_created = 0
         for index, challenge_data in enumerate(data.bag.challenges):
@@ -195,35 +170,25 @@ def launch_project_and_first_bag(
             db.flush()
             gas = challenge_data.gas_sponsorship
             if gas and gas.enabled:
-                _create_gas_policy(
-                    db,
-                    challenge=challenge,
-                    project=project,
-                    user=user,
-                    gas=gas,
-                )
+                _create_gas_policy(db, challenge=challenge, project=project, user=user, gas=gas)
                 gas_policies_created += 1
 
         if data.min_bag_score > 0:
-            db.add(
-                CampaignAccessRule(
-                    campaign_id=campaign.id,
-                    min_bag_score=data.min_bag_score,
-                    updated_by_id=user.id,
-                )
-            )
+            db.add(CampaignAccessRule(
+                campaign_id=campaign.id,
+                min_bag_score=data.min_bag_score,
+                updated_by_id=user.id,
+            ))
 
         reward_funding_status = "UNFUNDED"
         if data.reward_funding:
-            db.add(
-                CampaignFunding(
-                    campaign_id=campaign.id,
-                    declared_amount=data.reward_funding.amount,
-                    verified_amount=Decimal("0"),
-                    tx_hash=data.reward_funding.tx_hash,
-                    status="DECLARED",
-                )
-            )
+            db.add(CampaignFunding(
+                campaign_id=campaign.id,
+                declared_amount=data.reward_funding.amount,
+                verified_amount=Decimal("0"),
+                tx_hash=data.reward_funding.tx_hash,
+                status="DECLARED",
+            ))
             reward_funding_status = "DECLARED"
 
         db.commit()
@@ -239,8 +204,8 @@ def launch_project_and_first_bag(
             reward_funding_status=reward_funding_status,
             gas_policies_created=gas_policies_created,
             message=(
-                "Project published. First Bag saved as DRAFT. Once its full reward "
-                "obligation is independently verified it will become live in Bag Work automatically."
+                "Project published. First Bag saved as DRAFT. Once its full reward obligation "
+                "is independently verified it will become live in Bag Work automatically."
             ),
         )
     except HTTPException:

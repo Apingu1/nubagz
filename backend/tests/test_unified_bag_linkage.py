@@ -70,9 +70,9 @@ def test_full_reward_funding_makes_new_bag_live_and_discoverable_automatically()
                 'missions': [],
                 'challenges': [{
                     'title': 'Read the project brief',
-                    'description': 'Read the project brief and mark this learning activity complete.',
+                    'description': 'Read the project brief and submit a short evidence note for project review.',
                     'category': 'LEARN',
-                    'verification_type': 'SELF_ATTEST',
+                    'verification_type': 'PROJECT_REVIEW',
                     'config': {},
                     'xp_reward': 20,
                 }],
@@ -110,3 +110,4 @@ def test_full_reward_funding_makes_new_bag_live_and_discoverable_automatically()
         rows = [row for row in after.json() if row['campaign_id'] == campaign_id]
         assert len(rows) == 1
         assert rows[0]['title'] == 'Read the project brief'
+        assert rows[0]['verification_type'] == 'PROJECT_REVIEW'

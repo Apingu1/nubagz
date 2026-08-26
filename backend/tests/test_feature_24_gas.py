@@ -52,9 +52,13 @@ def test_challenge_scoped_gas_pass_reserves_atomically_budget_can_end_first_and_
 
             policy=next(p for p in client.get('/api/gas/policies/admin',headers=admin).json() if p['challenge_id']==challenge_id);policy_id=policy['id']
             assert policy['funding_status']=='DECLARED' and policy['status']=='FUNDING_PENDING'
-            # Total budget is allowed to be lower than per-claim cap × max claims.
             activated=client.post(f'/api/gas/policies/{policy_id}/verify',headers=admin,json={'funded_amount':0.005,'funding_reference':'feature24-verified'})
             assert activated.status_code==200 and activated.json()['funding_status']=='VERIFIED' and activated.json()['status']=='ACTIVE'
+
+            blocked=client.post(f'/api/gas/challenges/{challenge_id}/prepare',headers=user,json={})
+            assert blocked.status_code==400 and 'join this bag' in blocked.json()['detail'].lower()
+            assert client.post(f'/api/campaigns/{cid}/enroll',headers=user).status_code==200
+            assert client.post(f'/api/campaigns/{cid}/enroll',headers=second).status_code==200
 
             status=client.get(f'/api/gas/challenges/{challenge_id}',headers=user);assert status.status_code==200
             assert status.json()['mode']=='SPONSORED' and float(status.json()['max_sponsored_native'])==0.005
@@ -62,12 +66,8 @@ def test_challenge_scoped_gas_pass_reserves_atomically_budget_can_end_first_and_
             assert prepared.status_code==200 and prepared.json()['mode']=='SPONSORED' and prepared.json()['status']=='RESERVED'
             claim_id=prepared.json()['claim_id'];assert float(prepared.json()['reserved_native_amount'])==0.005
             tx=prepared.json()['transaction'];assert tx['to']=='0x1111111111111111111111111111111111111111' and tx['chainId']==43114
-
-            # Repeated prepare is idempotent and does not consume another slot/budget reservation.
             repeated=client.post(f'/api/gas/challenges/{challenge_id}/prepare',headers=user,json={})
             assert repeated.status_code==200 and repeated.json()['claim_id']==claim_id
-
-            # max_unique_users=1 is deterministic: another eligible wallet falls back to user-paid gas.
             no_slot=client.post(f'/api/gas/challenges/{challenge_id}/prepare',headers=second,json={})
             assert no_slot.status_code==200 and no_slot.json()['mode']=='USER_PAID' and no_slot.json()['reason']=='USER_LIMIT_REACHED'
             assert no_slot.json()['transaction']['to']=='0x1111111111111111111111111111111111111111'

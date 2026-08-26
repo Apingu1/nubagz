@@ -1,16 +1,18 @@
-from datetime import datetime, UTC
+from datetime import UTC, datetime
 from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+
+from ..challenge_models import Challenge, ChallengeCompletion, ChallengeOnchainProof, SocialAccount
 from ..db import get_db
 from ..deps import get_current_user
-from ..models import Campaign, Enrollment, LedgerEntry, Project, User, WalletConnection
-from ..challenge_models import Challenge, ChallengeCompletion, ChallengeOnchainProof, SocialAccount
-from ..economy_models import CampaignAccessRule, CampaignFunding
-from ..integration_models import GasSponsorshipPolicy
-from ..engagement_models import ReferralConversion
 from ..economy import campaign_distributed_total
+from ..economy_models import CampaignAccessRule, CampaignFunding
+from ..engagement_models import ReferralConversion
+from ..integration_models import GasSponsorshipPolicy
+from ..models import Campaign, Enrollment, LedgerEntry, Project, User, WalletConnection
 from ..schemas import ChallengeCompleteIn, ChallengeDecisionIn
 from ..x_verifier import XVerificationUnavailable, make_x_proof_code, verify_x_post_proof
 from .onchain import rpc_call
@@ -40,31 +42,25 @@ def _valid_tx_hash(value: str) -> bool:
 
 
 def _funding_available(db: Session, campaign: Campaign, next_gross: Decimal = Decimal("0")) -> bool:
-    funding = db.query(CampaignFunding).filter(CampaignFunding.campaign_id == campaign.id, CampaignFunding.status == "VERIFIED").first()
+    funding = db.query(CampaignFunding).filter(
+        CampaignFunding.campaign_id == campaign.id,
+        CampaignFunding.status == "VERIFIED",
+    ).first()
     if not funding:
         return False
     distributed = campaign_distributed_total(db, campaign.id)
     return Decimal(funding.verified_amount) - distributed >= next_gross
 
 
-def _ensure_enrollment(db: Session, user: User, campaign: Campaign) -> Enrollment:
-    enrollment = db.query(Enrollment).filter(Enrollment.user_id == user.id, Enrollment.campaign_id == campaign.id).first()
-    if enrollment:
-        return enrollment
-    if not _funding_available(db, campaign, Decimal(campaign.gross_reward_per_user)):
-        raise HTTPException(409, "This Bag is temporarily unavailable because verified reward inventory is exhausted")
-    trust = evaluate_user(db, user)
-    if trust.trust_level == "RESTRICTED":
-        raise HTTPException(403, "This account is restricted from new reward opportunities pending trust review")
-    access_rule = db.query(CampaignAccessRule).filter(CampaignAccessRule.campaign_id == campaign.id).first()
-    if access_rule and user.bag_score < access_rule.min_bag_score:
-        raise HTTPException(403, f"BagScore {access_rule.min_bag_score}+ required for this opportunity")
-    enrolled_count = db.query(func.count(Enrollment.id)).filter(Enrollment.campaign_id == campaign.id).scalar() or 0
-    if enrolled_count >= campaign.max_users:
-        raise HTTPException(409, "This Bag is full")
-    enrollment = Enrollment(user_id=user.id, campaign_id=campaign.id)
-    db.add(enrollment)
-    db.flush()
+def _require_enrollment(db: Session, user: User, campaign: Campaign) -> Enrollment:
+    enrollment = db.query(Enrollment).filter(
+        Enrollment.user_id == user.id,
+        Enrollment.campaign_id == campaign.id,
+    ).first()
+    if not enrollment:
+        raise HTTPException(400, "Join this Bag before completing its Bag Work")
+    if enrollment.status == "COMPLETED":
+        raise HTTPException(409, "This Bag is already completed")
     return enrollment
 
 
@@ -72,40 +68,114 @@ def _settle_campaign(db: Session, user: User, campaign: Campaign, enrollment: En
     gross = Decimal(campaign.gross_reward_per_user)
     if not _funding_available(db, campaign, gross):
         raise HTTPException(409, "Reward inventory was exhausted before this Bag could settle")
+
     referrer_profile = None
     if user.referred_by_id:
         referrer = db.get(User, user.referred_by_id)
         if referrer:
             referrer_profile = evaluate_user(db, referrer)
+
     user_amount = gross * Decimal(campaign.user_share_pct) / Decimal("100")
     platform_amount = gross * Decimal(campaign.nubagz_share_pct) / Decimal("100")
     referral_amount = gross * Decimal(campaign.referral_share_pct) / Decimal("100")
     enrollment.status = "COMPLETED"
     enrollment.completed_at = datetime.now(UTC)
     enrollment.earned_amount = user_amount
-    db.add(LedgerEntry(user_id=user.id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=user_amount, entry_type="CAMPAIGN_REWARD", note=f"Completed {campaign.title}"))
-    db.add(LedgerEntry(user_id=None, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=platform_amount, entry_type="PLATFORM_SHARE", note="NuBagz campaign share"))
+    db.add(LedgerEntry(
+        user_id=user.id,
+        campaign_id=campaign.id,
+        asset_symbol=campaign.reward_asset,
+        amount=user_amount,
+        entry_type="CAMPAIGN_REWARD",
+        note=f"Completed {campaign.title}",
+    ))
+    db.add(LedgerEntry(
+        user_id=None,
+        campaign_id=campaign.id,
+        asset_symbol=campaign.reward_asset,
+        amount=platform_amount,
+        entry_type="PLATFORM_SHARE",
+        note="NuBagz campaign share",
+    ))
     if user.referred_by_id and referral_amount > 0:
         referrer_level = referrer_profile.trust_level if referrer_profile else "REVIEW"
         if referrer_level not in REFERRAL_ELIGIBLE_LEVELS:
-            db.add(LedgerEntry(user_id=None, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=referral_amount, entry_type="COMMUNITY_SHARE", note=f"Referral share redirected because referrer trust is {referrer_level}"))
-            db.add(ReferralConversion(referrer_id=user.referred_by_id, referred_user_id=user.id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, allocated_amount=referral_amount, paid_amount=0, status="REDIRECTED", reason=f"Referrer {referrer_level.lower()} at settlement"))
+            db.add(LedgerEntry(
+                user_id=None,
+                campaign_id=campaign.id,
+                asset_symbol=campaign.reward_asset,
+                amount=referral_amount,
+                entry_type="COMMUNITY_SHARE",
+                note=f"Referral share redirected because referrer trust is {referrer_level}",
+            ))
+            db.add(ReferralConversion(
+                referrer_id=user.referred_by_id,
+                referred_user_id=user.id,
+                campaign_id=campaign.id,
+                asset_symbol=campaign.reward_asset,
+                allocated_amount=referral_amount,
+                paid_amount=0,
+                status="REDIRECTED",
+                reason=f"Referrer {referrer_level.lower()} at settlement",
+            ))
         else:
-            db.add(LedgerEntry(user_id=user.referred_by_id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=referral_amount, entry_type="REFERRAL_SHARE", note=f"Referral reward from {user.username}"))
-            db.add(ReferralConversion(referrer_id=user.referred_by_id, referred_user_id=user.id, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, allocated_amount=referral_amount, paid_amount=referral_amount, status="PAID", reason="Funded campaign conversion"))
+            db.add(LedgerEntry(
+                user_id=user.referred_by_id,
+                campaign_id=campaign.id,
+                asset_symbol=campaign.reward_asset,
+                amount=referral_amount,
+                entry_type="REFERRAL_SHARE",
+                note=f"Referral reward from {user.username}",
+            ))
+            db.add(ReferralConversion(
+                referrer_id=user.referred_by_id,
+                referred_user_id=user.id,
+                campaign_id=campaign.id,
+                asset_symbol=campaign.reward_asset,
+                allocated_amount=referral_amount,
+                paid_amount=referral_amount,
+                status="PAID",
+                reason="Funded campaign conversion",
+            ))
     else:
-        db.add(LedgerEntry(user_id=None, campaign_id=campaign.id, asset_symbol=campaign.reward_asset, amount=referral_amount, entry_type="COMMUNITY_SHARE", note="Unassigned referral share"))
+        db.add(LedgerEntry(
+            user_id=None,
+            campaign_id=campaign.id,
+            asset_symbol=campaign.reward_asset,
+            amount=referral_amount,
+            entry_type="COMMUNITY_SHARE",
+            note="Unassigned referral share",
+        ))
     user.bag_score = min(1000, user.bag_score + 20)
 
 
-def _finalize_completion(db: Session, user: User, campaign: Campaign, challenge: Challenge, completion: ChallengeCompletion, status: str, evidence: dict | None = None) -> bool:
-    enrollment = _ensure_enrollment(db, user, campaign)
-    other_verified = db.query(func.count(ChallengeCompletion.id)).join(Challenge, Challenge.id == ChallengeCompletion.challenge_id).filter(ChallengeCompletion.user_id == user.id, Challenge.campaign_id == campaign.id, ChallengeCompletion.id != completion.id, ChallengeCompletion.status.in_(VERIFIED_STATUSES)).scalar() or 0
-    total = db.query(func.count(Challenge.id)).filter(Challenge.campaign_id == campaign.id, Challenge.status == "ACTIVE").scalar() or 0
+def _finalize_completion(
+    db: Session,
+    user: User,
+    campaign: Campaign,
+    challenge: Challenge,
+    completion: ChallengeCompletion,
+    status: str,
+    evidence: dict | None = None,
+) -> bool:
+    enrollment = _require_enrollment(db, user, campaign)
+    other_verified = db.query(func.count(ChallengeCompletion.id)).join(
+        Challenge, Challenge.id == ChallengeCompletion.challenge_id
+    ).filter(
+        ChallengeCompletion.user_id == user.id,
+        Challenge.campaign_id == campaign.id,
+        ChallengeCompletion.id != completion.id,
+        ChallengeCompletion.status.in_(VERIFIED_STATUSES),
+    ).scalar() or 0
+    total = db.query(func.count(Challenge.id)).filter(
+        Challenge.campaign_id == campaign.id,
+        Challenge.status == "ACTIVE",
+    ).scalar() or 0
     verified_total = other_verified + 1
     will_complete = total > 0 and verified_total >= total and enrollment.status != "COMPLETED"
     if will_complete and not _funding_available(db, campaign, Decimal(campaign.gross_reward_per_user)):
         raise HTTPException(409, "Reward inventory was exhausted before this Bag could settle")
+
     now = datetime.now(UTC)
     completion.status = status
     completion.evidence = evidence or completion.evidence
@@ -128,13 +198,21 @@ def _public_config(challenge: Challenge) -> dict:
 def _gas_summary(db: Session, challenge: Challenge) -> dict | None:
     if challenge.category != "ONCHAIN":
         return None
-    policy = db.query(GasSponsorshipPolicy).filter(GasSponsorshipPolicy.challenge_id == challenge.id).first()
+    policy = db.query(GasSponsorshipPolicy).filter(
+        GasSponsorshipPolicy.challenge_id == challenge.id
+    ).first()
     if not policy:
         return {"enabled": False, "status": "USER_PAID"}
     now = datetime.now(UTC)
     starts = _as_utc(policy.starts_at)
     ends = _as_utc(policy.ends_at)
-    active = policy.status == "ACTIVE" and policy.funding_status == "VERIFIED" and (not starts or starts <= now) and (not ends or ends >= now) and Decimal(policy.spent_amount) < Decimal(policy.funded_amount)
+    active = (
+        policy.status == "ACTIVE"
+        and policy.funding_status == "VERIFIED"
+        and (not starts or starts <= now)
+        and (not ends or ends >= now)
+        and Decimal(policy.spent_amount) < Decimal(policy.funded_amount)
+    )
     return {
         "enabled": True,
         "active": active,
@@ -150,7 +228,14 @@ def _gas_summary(db: Session, challenge: Challenge) -> dict | None:
     }
 
 
-def _serialize_feed_row(db: Session, challenge: Challenge, campaign: Campaign, project: Project, completion: ChallengeCompletion | None, user: User) -> dict:
+def _serialize_feed_row(
+    db: Session,
+    challenge: Challenge,
+    campaign: Campaign,
+    project: Project,
+    completion: ChallengeCompletion | None,
+    user: User,
+) -> dict:
     user_reward = Decimal(campaign.gross_reward_per_user) * Decimal(campaign.user_share_pct) / Decimal("100")
     social_auto = challenge.category == "SOCIAL" and challenge.provider == "X" and challenge.verification_type == "AUTO"
     return {
@@ -171,6 +256,7 @@ def _serialize_feed_row(db: Session, challenge: Challenge, campaign: Campaign, p
         "config": _public_config(challenge),
         "proof_code": make_x_proof_code(user.id, challenge.id) if social_auto else None,
         "xp_reward": challenge.xp_reward,
+        "position": challenge.position,
         "reward_asset": campaign.reward_asset,
         "user_reward": str(user_reward),
         "starts_at": campaign.starts_at.isoformat() if campaign.starts_at else None,
@@ -180,17 +266,37 @@ def _serialize_feed_row(db: Session, challenge: Challenge, campaign: Campaign, p
     }
 
 
-def _verify_onchain_transaction(db: Session, user: User, project: Project, challenge: Challenge, tx_hash: str) -> dict:
+def _verify_onchain_transaction(
+    db: Session,
+    user: User,
+    project: Project,
+    challenge: Challenge,
+    tx_hash: str,
+) -> dict:
     tx_hash = tx_hash.strip()
     if not _valid_tx_hash(tx_hash):
         raise HTTPException(400, "Paste a valid EVM transaction hash beginning 0x followed by 64 hexadecimal characters")
-    wallet = db.query(WalletConnection).filter(WalletConnection.user_id == user.id, WalletConnection.verified_at.isnot(None)).order_by(WalletConnection.is_primary.desc(), WalletConnection.verified_at.desc()).first()
+    wallet = db.query(WalletConnection).filter(
+        WalletConnection.user_id == user.id,
+        WalletConnection.verified_at.isnot(None),
+    ).order_by(WalletConnection.is_primary.desc(), WalletConnection.verified_at.desc()).first()
     if not wallet:
         raise HTTPException(409, "Connect and verify an EVM wallet before verifying on-chain Bag Work")
-    existing = db.query(ChallengeOnchainProof).filter(ChallengeOnchainProof.challenge_id == challenge.id, ChallengeOnchainProof.tx_hash == tx_hash).first()
+
+    existing = db.query(ChallengeOnchainProof).filter(
+        ChallengeOnchainProof.challenge_id == challenge.id,
+        ChallengeOnchainProof.tx_hash == tx_hash,
+    ).first()
     if existing:
         if existing.user_id == user.id:
-            return {"verification": "ONCHAIN_RPC", "tx_hash": tx_hash, "chain": existing.chain, "from": existing.wallet_address, "to": existing.target_address, "reused": False}
+            return {
+                "verification": "ONCHAIN_RPC",
+                "tx_hash": tx_hash,
+                "chain": existing.chain,
+                "from": existing.wallet_address,
+                "to": existing.target_address,
+                "reused": False,
+            }
         raise HTTPException(409, "This transaction has already been used to verify this Bag Work activity")
 
     config = dict(challenge.config or {})
@@ -236,35 +342,109 @@ def _verify_onchain_transaction(db: Session, user: User, project: Project, chall
     if actual_value != expected_value:
         raise HTTPException(400, "Transaction value did not match this Bag Work activity")
 
-    proof = ChallengeOnchainProof(challenge_id=challenge.id, user_id=user.id, wallet_address=wallet.address, chain=chain, tx_hash=tx_hash, target_address=actual_target or target)
+    proof = ChallengeOnchainProof(
+        challenge_id=challenge.id,
+        user_id=user.id,
+        wallet_address=wallet.address,
+        chain=chain,
+        tx_hash=tx_hash,
+        target_address=actual_target or target,
+    )
     db.add(proof)
     db.flush()
-    return {"verification": "ONCHAIN_RPC", "tx_hash": tx_hash, "chain": chain, "from": sender, "to": actual_target, "reused": False}
+    return {
+        "verification": "ONCHAIN_RPC",
+        "tx_hash": tx_hash,
+        "chain": chain,
+        "from": sender,
+        "to": actual_target,
+        "reused": False,
+    }
 
 
 @router.get("")
-def list_bag_work(category: str | None = Query(default=None), provider: str | None = Query(default=None), db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def list_bag_work(
+    category: str | None = Query(default=None),
+    provider: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     now = datetime.now(UTC)
-    q = db.query(Challenge, Campaign, Project).join(Campaign, Campaign.id == Challenge.campaign_id).join(Project, Project.id == Campaign.project_id).filter(Challenge.status == "ACTIVE", Campaign.status == "LIVE", Project.status.in_(PUBLIC_PROJECT_STATUSES))
+    q = db.query(Challenge, Campaign, Project).join(
+        Campaign, Campaign.id == Challenge.campaign_id
+    ).join(Project, Project.id == Campaign.project_id).filter(
+        Challenge.status == "ACTIVE",
+        Campaign.status == "LIVE",
+        Project.status.in_(PUBLIC_PROJECT_STATUSES),
+    )
     if category:
         q = q.filter(Challenge.category == category.upper())
     if provider:
         q = q.filter(Challenge.provider == provider.upper())
     rows = []
-    for challenge, campaign, project in q.order_by(Campaign.featured.desc(), Campaign.created_at.desc(), Challenge.position).all():
+    for challenge, campaign, project in q.order_by(
+        Campaign.featured.desc(), Campaign.created_at.desc(), Challenge.position
+    ).all():
         starts = _as_utc(campaign.starts_at)
         ends = _as_utc(campaign.ends_at)
         if starts and starts > now:
             continue
         if ends and ends < now:
             continue
-        completion = db.query(ChallengeCompletion).filter(ChallengeCompletion.user_id == user.id, ChallengeCompletion.challenge_id == challenge.id).first()
+        completion = db.query(ChallengeCompletion).filter(
+            ChallengeCompletion.user_id == user.id,
+            ChallengeCompletion.challenge_id == challenge.id,
+        ).first()
         rows.append(_serialize_feed_row(db, challenge, campaign, project, completion, user))
     return rows
 
 
+@router.get("/campaigns/{campaign_id}")
+def campaign_bag_work(
+    campaign_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    campaign = db.get(Campaign, campaign_id)
+    project = db.get(Project, campaign.project_id) if campaign else None
+    if not campaign or campaign.status != "LIVE" or not project or project.status not in PUBLIC_PROJECT_STATUSES:
+        raise HTTPException(404, "Bag is not live")
+    enrollment = db.query(Enrollment).filter(
+        Enrollment.user_id == user.id,
+        Enrollment.campaign_id == campaign.id,
+    ).first()
+    challenges = db.query(Challenge).filter(
+        Challenge.campaign_id == campaign.id,
+        Challenge.status == "ACTIVE",
+    ).order_by(Challenge.position, Challenge.id).all()
+    rows = []
+    completed_count = 0
+    for challenge in challenges:
+        completion = db.query(ChallengeCompletion).filter(
+            ChallengeCompletion.user_id == user.id,
+            ChallengeCompletion.challenge_id == challenge.id,
+        ).first()
+        if completion and completion.status in VERIFIED_STATUSES:
+            completed_count += 1
+        rows.append(_serialize_feed_row(db, challenge, campaign, project, completion, user))
+    return {
+        "campaign_id": campaign.id,
+        "joined": bool(enrollment),
+        "enrollment_status": enrollment.status if enrollment else None,
+        "earned_amount": str(enrollment.earned_amount) if enrollment else "0",
+        "completed_count": completed_count,
+        "total_count": len(challenges),
+        "challenges": rows,
+    }
+
+
 @router.post("/{challenge_id}/complete")
-def complete_challenge(challenge_id: int, data: ChallengeCompleteIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def complete_challenge(
+    challenge_id: int,
+    data: ChallengeCompleteIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     challenge = db.get(Challenge, challenge_id)
     if not challenge or challenge.status != "ACTIVE":
         raise HTTPException(404, "Bag Work activity not found")
@@ -272,19 +452,40 @@ def complete_challenge(challenge_id: int, data: ChallengeCompleteIn, db: Session
     project = db.get(Project, campaign.project_id) if campaign else None
     if not campaign or campaign.status != "LIVE" or not project or project.status not in PUBLIC_PROJECT_STATUSES:
         raise HTTPException(404, "This Bag is not live")
-    if db.query(ChallengeCompletion).filter(ChallengeCompletion.user_id == user.id, ChallengeCompletion.challenge_id == challenge.id).first():
-        raise HTTPException(409, "This Bag Work activity has already been submitted")
+
+    _require_enrollment(db, user, campaign)
     trust = evaluate_user(db, user)
     if trust.trust_level == "RESTRICTED":
         raise HTTPException(403, "This account is restricted from completing reward opportunities pending trust review")
-    completion = ChallengeCompletion(user_id=user.id, challenge_id=challenge.id, status="PENDING", answer=data.answer, evidence={"submission": data.evidence} if data.evidence else None)
-    db.add(completion)
+
+    completion = db.query(ChallengeCompletion).filter(
+        ChallengeCompletion.user_id == user.id,
+        ChallengeCompletion.challenge_id == challenge.id,
+    ).first()
+    if completion and completion.status != "REJECTED":
+        raise HTTPException(409, "This Bag Work activity has already been submitted")
+    if completion:
+        completion.status = "PENDING"
+        completion.answer = data.answer
+        completion.evidence = {"submission": data.evidence.strip()} if data.evidence and data.evidence.strip() else None
+        completion.submitted_at = datetime.now(UTC)
+        completion.verified_at = None
+        completion.completed_at = None
+    else:
+        completion = ChallengeCompletion(
+            user_id=user.id,
+            challenge_id=challenge.id,
+            status="PENDING",
+            answer=data.answer,
+            evidence={"submission": data.evidence.strip()} if data.evidence and data.evidence.strip() else None,
+        )
+        db.add(completion)
     db.flush()
+
     verification = challenge.verification_type.upper()
     if verification == "PROJECT_REVIEW":
         if not data.evidence or not data.evidence.strip():
             raise HTTPException(400, "Add a proof link or short evidence note for project review")
-        _ensure_enrollment(db, user, campaign)
         db.commit()
         return {"ok": True, "status": "PENDING", "completed": False}
 
@@ -299,7 +500,10 @@ def complete_challenge(challenge_id: int, data: ChallengeCompleteIn, db: Session
         if challenge.category == "SOCIAL" and challenge.provider == "X":
             if not data.evidence or not data.evidence.strip():
                 raise HTTPException(400, "Paste the URL of your public X proof post")
-            account = db.query(SocialAccount).filter(SocialAccount.user_id == user.id, SocialAccount.provider == "X").first()
+            account = db.query(SocialAccount).filter(
+                SocialAccount.user_id == user.id,
+                SocialAccount.provider == "X",
+            ).first()
             if not account:
                 raise HTTPException(409, "Connect your X account in My Bag before verifying this activity")
             proof_code = make_x_proof_code(user.id, challenge.id)
@@ -309,7 +513,15 @@ def complete_challenge(challenge_id: int, data: ChallengeCompleteIn, db: Session
                 raise HTTPException(503, str(exc)) from exc
             if not verified:
                 reason = str(evidence.get("reason") or "")
-                messages = {"wrong_author":"That post was not published by the X account connected to your NuBagz profile.","url_author_mismatch":"That X post URL does not match your connected X username.","proof_code_missing":"Your unique NuBagz proof code is missing from that X post.","multiple_proof_codes":"Use one NuBagz proof code per X post.","challenge_requirement_missing":"That X post is missing the required phrase, mention, hashtag or link.","post_not_public_or_not_found":"NuBagz could not find that as a public X post.","post_text_unavailable":"X did not expose readable public text for that post."}
+                messages = {
+                    "wrong_author": "That post was not published by the X account connected to your NuBagz profile.",
+                    "url_author_mismatch": "That X post URL does not match your connected X username.",
+                    "proof_code_missing": "Your unique NuBagz proof code is missing from that X post.",
+                    "multiple_proof_codes": "Use one NuBagz proof code per X post.",
+                    "challenge_requirement_missing": "That X post is missing the required phrase, mention, hashtag or link.",
+                    "post_not_public_or_not_found": "NuBagz could not find that as a public X post.",
+                    "post_text_unavailable": "X did not expose readable public text for that post.",
+                }
                 raise HTTPException(400, messages.get(reason, "NuBagz could not verify that public X proof post."))
         elif challenge.category == "ONCHAIN":
             if not data.evidence or not data.evidence.strip():
@@ -317,16 +529,27 @@ def complete_challenge(challenge_id: int, data: ChallengeCompleteIn, db: Session
             evidence = _verify_onchain_transaction(db, user, project, challenge, data.evidence.strip())
         else:
             raise HTTPException(400, "Automatic verification is not configured for this Bag Work activity")
-    elif verification != "SELF_ATTEST":
+    else:
         raise HTTPException(400, f"Unsupported verification type {verification}")
 
     completed_now = _finalize_completion(db, user, campaign, challenge, completion, "VERIFIED", evidence)
     db.commit()
-    return {"ok": True, "status": "VERIFIED", "completed": completed_now, "xp": user.xp, "bag_score": user.bag_score}
+    return {
+        "ok": True,
+        "status": "VERIFIED",
+        "completed": completed_now,
+        "xp": user.xp,
+        "bag_score": user.bag_score,
+    }
 
 
 @router.post("/completions/{completion_id}/decision")
-def decide_completion(completion_id: int, data: ChallengeDecisionIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+def decide_completion(
+    completion_id: int,
+    data: ChallengeDecisionIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
     completion = db.get(ChallengeCompletion, completion_id)
     if not completion:
         raise HTTPException(404, "Submission not found")
@@ -348,12 +571,37 @@ def decide_completion(completion_id: int, data: ChallengeDecisionIn, db: Session
     worker = db.get(User, completion.user_id)
     if not worker:
         raise HTTPException(404, "Worker account not found")
-    completed_now = _finalize_completion(db, worker, campaign, challenge, completion, "APPROVED", completion.evidence)
+    completed_now = _finalize_completion(
+        db, worker, campaign, challenge, completion, "APPROVED", completion.evidence
+    )
     db.commit()
     return {"ok": True, "status": "APPROVED", "completed": completed_now}
 
 
 @router.get("/submissions/project")
-def project_submissions(db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    rows = db.query(ChallengeCompletion, Challenge, Campaign, Project, User).join(Challenge, Challenge.id == ChallengeCompletion.challenge_id).join(Campaign, Campaign.id == Challenge.campaign_id).join(Project, Project.id == Campaign.project_id).join(User, User.id == ChallengeCompletion.user_id).filter(Project.owner_id == user.id, ChallengeCompletion.status == "PENDING", Challenge.verification_type == "PROJECT_REVIEW").order_by(ChallengeCompletion.submitted_at.asc()).all()
-    return [{"id":completion.id,"challenge_id":challenge.id,"challenge_title":challenge.title,"campaign_title":campaign.title,"project_name":project.name,"username":worker.username,"evidence":completion.evidence,"submitted_at":completion.submitted_at.isoformat()} for completion,challenge,campaign,project,worker in rows]
+def project_submissions(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    rows = db.query(ChallengeCompletion, Challenge, Campaign, Project, User).join(
+        Challenge, Challenge.id == ChallengeCompletion.challenge_id
+    ).join(Campaign, Campaign.id == Challenge.campaign_id).join(
+        Project, Project.id == Campaign.project_id
+    ).join(User, User.id == ChallengeCompletion.user_id).filter(
+        Project.owner_id == user.id,
+        ChallengeCompletion.status == "PENDING",
+        Challenge.verification_type == "PROJECT_REVIEW",
+    ).order_by(ChallengeCompletion.submitted_at.asc()).all()
+    return [
+        {
+            "id": completion.id,
+            "challenge_id": challenge.id,
+            "challenge_title": challenge.title,
+            "campaign_title": campaign.title,
+            "project_name": project.name,
+            "username": worker.username,
+            "evidence": completion.evidence,
+            "submitted_at": completion.submitted_at.isoformat(),
+        }
+        for completion, challenge, campaign, project, worker in rows
+    ]

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { LayoutDashboard, Trophy, BriefcaseBusiness, Shield, LogOut, WalletCards, Zap, BadgePoundSterling, Gift, ShieldCheck, UserRoundCheck, Network, Coins, Bell, BarChart3, FileStack, Star, Scale, Activity, ArrowLeftRight, PanelLeftClose, PanelLeftOpen, Menu, X, ListChecks } from 'lucide-react'
+import { LayoutDashboard, Trophy, BriefcaseBusiness, Shield, LogOut, WalletCards, Zap, BadgePoundSterling, Gift, ShieldCheck, UserRoundCheck, Network, Coins, Bell, BarChart3, FileStack, Scale, Activity, ArrowLeftRight, PanelLeftClose, PanelLeftOpen, Menu, X, ListChecks } from 'lucide-react'
 import { usePrivy } from '@privy-io/react-auth'
 import { Logo } from './Logo'
 import { BagZRouteFeature } from './BagZMascot'
@@ -18,7 +18,7 @@ export default function AppShell(){
  useEffect(()=>{setMobileOpen(false)},[location.pathname])
  const finishLogout=()=>{logout();nav('/')}
  const coreItems=[['/app','Home',LayoutDashboard],['/app/bag','My Bag',WalletCards],['/app/work','Bag Work',ListChecks],['/app/drops','BagDrops',Gift],['/app/swaps','Swaps',ArrowLeftRight],['/app/earnings','Earnings',BadgePoundSterling]] as const
- const trustItems=[['/app/trust','Project Trust',ShieldCheck],['/app/account-trust','My Trust',UserRoundCheck],['/app/reviews','Reviews',Star],['/app/reports','Reports',Scale]] as const
+ const trustItems=[['/app/trust','Project Trust',ShieldCheck],['/app/account-trust','My Trust',UserRoundCheck],['/app/reports','Reports',Scale]] as const
  const accountItems=[['/app/notifications','Notifications',Bell],['/app/activity','Activity',Activity],['/app/referrals','Referrals',Network],['/app/leaderboard','Leaderboard',Trophy]] as const
  const buildItems=[['/app/studio','Creator Studio',BriefcaseBusiness],['/app/revenue-share','Revenue Share',Coins]] as const
  const linkClass=({isActive}:{isActive:boolean})=>isActive?'side-link active':'side-link'
