@@ -10,6 +10,8 @@ def now():
 
 
 class SwapIntent(Base):
+    """Legacy draft-swap storage retained for compatibility with old databases."""
+
     __tablename__ = "swap_intents"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
@@ -25,6 +27,35 @@ class SwapIntent(Base):
     quoted_buy_amount: Mapped[Decimal | None] = mapped_column(Numeric(36, 18), nullable=True)
     quote_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     transaction_payload: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
+
+
+class SwapTrade(Base):
+    """Executable aggregator route and genuine wallet transaction state.
+
+    Token amounts are stored as decimal strings of integer base units. This is
+    deliberate: ERC-20 uint256 quantities can exceed the integer capacity of a
+    fixed NUMERIC(36,18) column and must not lose precision.
+    """
+
+    __tablename__ = "swap_trades"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    wallet_connection_id: Mapped[int] = mapped_column(ForeignKey("wallet_connections.id"), index=True)
+    chain: Mapped[str] = mapped_column(String(32), index=True)
+    chain_id: Mapped[int] = mapped_column(Integer, index=True)
+    sell_asset: Mapped[str] = mapped_column(String(64))
+    buy_asset: Mapped[str] = mapped_column(String(64))
+    sell_amount_raw: Mapped[str] = mapped_column(String(96))
+    quoted_buy_amount_raw: Mapped[str] = mapped_column(String(96))
+    max_slippage_bps: Mapped[int] = mapped_column(Integer, default=100)
+    status: Mapped[str] = mapped_column(String(32), default="QUOTED", index=True)
+    provider_name: Mapped[str] = mapped_column(String(80), index=True)
+    provider_quote_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    quote_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    transaction_payload: Mapped[str] = mapped_column(Text)
+    tx_hash: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=now, onupdate=now)
 
