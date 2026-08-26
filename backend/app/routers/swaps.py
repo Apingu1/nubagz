@@ -77,6 +77,18 @@ def _valid_tx_hash(value: object) -> bool:
         return False
 
 
+def _quantity_int(value: object) -> int:
+    if value is None or value == "":
+        return 0
+    if isinstance(value, int):
+        return value
+    text = str(value).strip()
+    try:
+        return int(text, 0)
+    except ValueError as exc:
+        raise HTTPException(502, "Swap router returned an invalid transaction quantity") from exc
+
+
 def _chain(value: str):
     key = value.strip().lower()
     if key == "robinhood chain":
@@ -146,6 +158,12 @@ def _validate_transaction(transaction: dict, chain: dict, wallet: WalletConnecti
     data = transaction.get("data", "0x")
     if not isinstance(data, str) or not data.startswith("0x"):
         raise HTTPException(502, "Swap router returned invalid transaction data")
+    try:
+        if len(data) > 2:
+            int(data[2:], 16)
+    except ValueError as exc:
+        raise HTTPException(502, "Swap router returned non-hexadecimal transaction data") from exc
+    _quantity_int(transaction.get("value"))
     sender = transaction.get("from")
     if sender and str(sender).lower() != wallet.address.lower():
         raise HTTPException(502, "Swap router transaction sender does not match the verified wallet")
@@ -559,6 +577,9 @@ def confirm_swap(
         raise HTTPException(409, "The verified wallet for this swap is no longer available")
     details = json.loads(row.transaction_payload) if row.transaction_payload else {}
     expected = details.get("transaction") or {}
+    existing_hash = details.get("tx_hash")
+    if existing_hash and str(existing_hash).lower() != data.tx_hash.lower():
+        raise HTTPException(409, "This swap session is already bound to a different wallet transaction")
     receipt = rpc_call(row.chain, "eth_getTransactionReceipt", [data.tx_hash])
     tx = rpc_call(row.chain, "eth_getTransactionByHash", [data.tx_hash])
     if not tx:
@@ -567,6 +588,12 @@ def confirm_swap(
         raise HTTPException(400, "Swap transaction was not sent from the verified wallet")
     if str(tx.get("to") or "").lower() != str(expected.get("to") or "").lower():
         raise HTTPException(400, "Swap transaction destination does not match the selected executable route")
+    expected_data = str(expected.get("data") or "0x").lower()
+    actual_data = str(tx.get("input") or tx.get("data") or "0x").lower()
+    if actual_data != expected_data:
+        raise HTTPException(400, "Swap transaction calldata does not match the selected executable route")
+    if _quantity_int(tx.get("value")) != _quantity_int(expected.get("value")):
+        raise HTTPException(400, "Swap transaction value does not match the selected executable route")
     details["tx_hash"] = data.tx_hash
     if not receipt:
         row.status = "SUBMITTED"
