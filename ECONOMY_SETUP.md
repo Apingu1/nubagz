@@ -20,6 +20,8 @@ Explorer: https://robinhoodchain.blockscout.com
 
 The official public RPC is configured by default for development. A dedicated production RPC/provider can replace it with `EVM_RPC_ROBINHOOD`.
 
+For Robinhood transactions, NuBagz always reasons from **chain ID 4663 + the chain's native ETH asset**. Ethereum Mainnet ETH on chain ID 1 is a separate balance and is never treated as available gas or sell balance for a Robinhood-chain transaction.
+
 ## NuBagz Swap
 
 The old draft/intent swap experience is retired from the user interface. NuBagz Swap requests **real executable same-chain EVM quotes** from 0x and LI.FI, presents a Route Race, and sends the selected provider transaction to the user's already-connected wallet for signature.
@@ -35,6 +37,8 @@ NuBagz never receives the user's private key, never signs the swap, and never tr
 For ERC-20 sells, the frontend checks the existing allowance and, when required, requests an **exact sell-amount approval** to the spender returned by the selected aggregator route. NuBagz does not request unlimited token approvals by default.
 
 ### Swap environment variables
+
+The root `.env` values below are forwarded by `docker-compose.yml` into the API container. After changing them, rebuild/recreate the API container (for example with `./run_stack.sh`) so the running backend sees the new values.
 
 ```env
 # Robinhood Chain / authoritative receipt verification
