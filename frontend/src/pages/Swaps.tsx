@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, ArrowDown, ArrowLeftRight, CheckCircle2, ExternalLink, Gauge, Info, RefreshCw, Route, Search, ShieldCheck, Sparkles, Wallet } from 'lucide-react'
 import { useWallets } from '@privy-io/react-auth'
 import { api } from '../lib/api'
@@ -63,10 +63,11 @@ function SwapExecutor({route,chain,sellToken,sellAmount,walletAddress,onMessage,
 }
 
 function TokenPicker({label,chain,value,onChange}:{label:string;chain:Chain;value:Token;onChange:(token:Token)=>void}){
- const [open,setOpen]=useState(false);const [q,setQ]=useState('');const [rows,setRows]=useState<Token[]>(chain.tokens||[]);const [loading,setLoading]=useState(false)
- useEffect(()=>{setRows(chain.tokens||[]);setQ('')},[chain.key])
+ const rootRef=useRef<HTMLDivElement|null>(null);const [open,setOpen]=useState(false);const [q,setQ]=useState('');const [rows,setRows]=useState<Token[]>(chain.tokens||[]);const [loading,setLoading]=useState(false)
+ useEffect(()=>{setRows(chain.tokens||[]);setQ('');setOpen(false)},[chain.key])
+ useEffect(()=>{if(!open)return;const closeOnOutside=(event:PointerEvent)=>{if(rootRef.current&&!rootRef.current.contains(event.target as Node)){setOpen(false);setQ('')}};document.addEventListener('pointerdown',closeOnOutside);return()=>document.removeEventListener('pointerdown',closeOnOutside)},[open])
  useEffect(()=>{if(!open||!q.trim()){setRows(chain.tokens||[]);return}const timer=setTimeout(()=>{setLoading(true);api<Token[]>(`/swaps/token-search?chain=${encodeURIComponent(chain.name)}&q=${encodeURIComponent(q.trim())}`).then(setRows).catch(()=>setRows([])).finally(()=>setLoading(false))},250);return()=>clearTimeout(timer)},[q,open,chain])
- return <div className="swap-token-field"><span>{label}</span><button type="button" className="token-select" onClick={()=>setOpen(v=>!v)}><b>{value.symbol}</b><small>{value.kind==='native'?chain.display_name:shortAddress(value.address)}</small><ArrowDown/></button>{open&&<div className="token-menu"><div className="token-search"><Search/><input autoFocus value={q} onChange={e=>setQ(e.target.value)} placeholder="Search token or paste 0x contract"/></div>{loading&&<small>Reading token metadata…</small>}{rows.map(token=><button type="button" key={token.address.toLowerCase()} onClick={()=>{onChange(token);setOpen(false);setQ('')}}><div><strong>{token.symbol}</strong><span>{token.name}</span></div><small>{token.kind==='native'?'Native':shortAddress(token.address)}{token.metadata_estimated?' • metadata estimated':''}</small></button>)}{!loading&&!rows.length&&<div className="token-empty">No matching token found on this chain.</div>}</div>}</div>
+ return <div ref={rootRef} className={`swap-token-field ${open?'open':''}`}><span>{label}</span><button type="button" className="token-select" onClick={()=>setOpen(v=>!v)} aria-expanded={open}><b>{value.symbol}</b><small>{value.kind==='native'?chain.display_name:shortAddress(value.address)}</small><ArrowDown/></button>{open&&<div className="token-menu"><div className="token-search"><Search/><input autoFocus value={q} onChange={e=>setQ(e.target.value)} placeholder="Search token or paste 0x contract"/></div>{loading&&<small>Reading token metadata…</small>}{rows.map(token=><button type="button" key={token.address.toLowerCase()} onClick={()=>{onChange(token);setOpen(false);setQ('')}}><div><strong>{token.symbol}</strong><span>{token.name}</span></div><small>{token.kind==='native'?'Native':shortAddress(token.address)}{token.metadata_estimated?' • metadata estimated':''}</small></button>)}{!loading&&!rows.length&&<div className="token-empty">No matching token found on this chain.</div>}</div>}</div>
 }
 
 export default function Swaps(){
