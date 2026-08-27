@@ -26,14 +26,14 @@ def test_bagbuilder_api_is_retired_and_platform_share_is_not_diverted():
         assert participant_res.status_code==200
         participant={'Authorization':f"Bearer {participant_res.json()['access_token']}"}
 
-        project=client.post('/api/projects',headers=creator,json={'name':'Feature Eleven Simplified Economy','symbol':'BUILD11','description':'An isolated project proving community BagBuilder attribution has been retired from active settlement.','chain':'Avalanche'})
+        project=client.post('/api/projects',headers=creator,json={'name':'Feature Eleven Simplified Economy','symbol':'BUILD11','description':'An isolated project proving community BagBuilder attribution has been retired from active settlement.','chain':'Robinhood'})
         assert project.status_code==200 and project.json()['status']=='LIVE'
         pid=project.json()['id']
         campaign=client.post('/api/campaigns',headers=creator,json={
-            'project_id':pid,'title':'Direct Participation Bag','description':'A funded campaign that settles only the user, NuBagz platform and referral/community shares.',
+            'project_id':pid,'title':'Direct Participation Bag','description':'A funded Challenge Bag that settles only the user, NuBagz platform and referral/community shares.',
             'category':'LEARN','difficulty':'EASY','reward_asset':'BUILD11','funding_type':'TOKEN','token_allocation':100,
             'gross_reward_per_user':100,'user_share_pct':80,'nubagz_share_pct':15,'referral_share_pct':5,'max_users':1,
-            'missions':[{'title':'Complete direct route','description':'Finish the creator-defined activity without a community pathway layer.','mission_type':'LEARN','verification_type':'SELF_ATTEST','xp_reward':10}]
+            'missions':[],'challenges':[{'title':'Complete direct route','description':'Finish the creator-defined quiz without a community pathway layer.','category':'LEARN','verification_type':'QUIZ','config':{'answer':'complete'},'xp_reward':10}]
         })
         assert campaign.status_code==200 and campaign.json()['status']=='DRAFT'
         cid=campaign.json()['id']
@@ -47,8 +47,8 @@ def test_bagbuilder_api_is_retired_and_platform_share_is_not_diverted():
         assert client.get('/api/builders/stats',headers=former_builder).status_code==404
 
         assert client.post(f'/api/campaigns/{cid}/enroll',headers=participant).status_code==200
-        mission=client.get(f'/api/campaigns/{cid}').json()['missions'][0]
-        complete=client.post(f"/api/campaigns/{cid}/missions/{mission['id']}/complete",headers=participant,json={'answer':None})
+        challenge=client.get(f'/api/campaigns/{cid}').json()['challenges'][0]
+        complete=client.post(f"/api/challenges/{challenge['id']}/complete",headers=participant,json={'answer':'complete'})
         assert complete.status_code==200 and complete.json()['completed'] is True
 
         assert asset_balance(client, participant, 'BUILD11')==80

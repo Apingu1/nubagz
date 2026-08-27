@@ -1,0 +1,90 @@
+.swap-head{align-items:flex-start}
+
+.network-control select,.swap-settings-row select{
+  color-scheme:dark;
+  background:#151920;
+  color:#f5f7fb;
+}
+.network-control select option,.swap-settings-row select option{
+  background:#11151a;
+  color:#f5f7fb;
+}
+
+.trade-composer,.swap-box{overflow:visible}
+.swap-box:has(.swap-token-field.open){z-index:90}
+.swap-token-field.open{z-index:100}
+.swap-token-field.open .token-menu{z-index:120}
+
+.trade-value-line{
+  display:flex;
+  align-items:baseline;
+  gap:8px;
+  flex-wrap:wrap;
+  min-width:0;
+}
+.trade-value-line .swap-amount{
+  width:auto!important;
+  min-width:4ch;
+  max-width:65%;
+  flex:0 1 auto;
+}
+.trade-value-line .swap-output{
+  display:inline-block;
+  min-height:0;
+  flex:0 1 auto;
+}
+.trade-asset-symbol{
+  font:600 17px/1 'Space Grotesk',sans-serif;
+  color:var(--text);
+  white-space:nowrap;
+}
+.trade-usd-estimate{
+  font-size:13px;
+  font-weight:600;
+  color:var(--muted);
+  white-space:nowrap;
+}
+.output-value-line .trade-usd-estimate{color:rgba(255,255,255,.62)}
+
+.route-results-head>.route-results-title{
+  display:flex;
+  align-items:center;
+  gap:7px;
+  font-size:11px;
+  letter-spacing:.12em;
+}
+.quote-freshness-control{
+  display:flex!important;
+  align-items:center!important;
+  gap:8px!important;
+  letter-spacing:normal!important;
+}
+.quote-timer{
+  color:var(--muted);
+  font-size:11px;
+  font-variant-numeric:tabular-nums;
+  white-space:nowrap;
+}
+.quote-timer.urgent{color:#ffb84d}
+.quote-timer.expired{color:#ff8080}
+.quote-refresh-btn{
+  display:inline-flex;
+  align-items:center;
+  gap:5px;
+  white-space:nowrap;
+}
+.quote-refresh-btn svg{width:13px;height:13px}
+.quote-refresh-btn:disabled{opacity:.55;cursor:not-allowed}
+.route-results.stale .route-card{opacity:.68}
+.route-results.stale .route-card.selected{border-color:rgba(255,184,77,.32);background:rgba(255,184,77,.035)}
+.execute-swap-btn:disabled{opacity:.62;cursor:not-allowed}
+
+@media(max-width:760px){
+  .quote-freshness-control{width:100%;justify-content:space-between}
+  .trade-value-line .swap-amount{max-width:58%}
+}
+@media(max-width:480px){
+  .trade-value-line{gap:6px}
+  .trade-asset-symbol{font-size:15px}
+  .trade-usd-estimate{font-size:12px}
+}

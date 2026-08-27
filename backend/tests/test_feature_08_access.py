@@ -8,9 +8,10 @@ def login(client, email, password):
     return {'Authorization': f"Bearer {res.json()['access_token']}"}
 
 
-def test_bagscore_tiers_expose_benefits_and_campaign_gate_new_enrollments():
+def test_bagscore_tiers_expose_benefits_and_gate_isolated_challenge_bag_enrollments():
     with TestClient(app) as client:
         creator = login(client, 'creator@demo.nubagz.com', 'Creator123!')
+        admin = login(client, 'admin@demo.nubagz.com', 'Admin123!')
         earner = login(client, 'demo@demo.nubagz.com', 'Demo123!')
 
         tiers = client.get('/api/access/tiers')
@@ -27,8 +28,29 @@ def test_bagscore_tiers_expose_benefits_and_campaign_gate_new_enrollments():
         assert profile.json()['points_to_next'] == 115
         assert 'Creator and bounty opportunities' in profile.json()['benefits']
 
-        campaigns = client.get('/api/campaigns/mine', headers=creator).json()
-        target = next(c for c in campaigns if c['status'] == 'LIVE')
+        project = client.post('/api/projects', headers=creator, json={
+            'name': 'Feature Eight Access Isolation', 'symbol': 'ACC08',
+            'description': 'An isolated funded Bag used only to prove BagScore access gating without shared fixture capacity.',
+            'chain': 'Robinhood'
+        })
+        assert project.status_code == 200
+        bag = client.post('/api/campaigns', headers=creator, json={
+            'project_id': project.json()['id'], 'title': 'Access Gate Challenge Bag',
+            'description': 'A small isolated Challenge-based Bag with enough reward inventory for deterministic access tests.',
+            'category': 'LEARN', 'difficulty': 'EASY', 'reward_asset': 'ACC08', 'funding_type': 'TOKEN',
+            'token_allocation': 10, 'gross_reward_per_user': 1, 'user_share_pct': 80, 'nubagz_share_pct': 15,
+            'referral_share_pct': 5, 'max_users': 10, 'missions': [],
+            'challenges': [{
+                'title': 'Access proof quiz', 'description': 'A deterministic quiz Challenge used only to make this Bag publishable.',
+                'category': 'LEARN', 'verification_type': 'QUIZ', 'config': {'answer': 'access'}, 'xp_reward': 1
+            }]
+        })
+        assert bag.status_code == 200
+        target = bag.json()
+        assert client.post(f"/api/funding/campaigns/{target['id']}/declare", headers=creator, json={'amount': 10, 'tx_hash': 'feature08-funding'}).status_code == 200
+        assert client.post(f"/api/funding/campaigns/{target['id']}/verify", headers=admin, json={'amount': 10, 'tx_hash': 'feature08-funding'}).status_code == 200
+        assert client.post(f"/api/campaigns/{target['id']}/publish", headers=creator).status_code == 200
+
         gate = client.post(f"/api/access/campaigns/{target['id']}", headers=creator, json={'min_bag_score': 600})
         assert gate.status_code == 200
         assert gate.json()['required_tier'] == 'PREMIUM'

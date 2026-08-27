@@ -31,8 +31,8 @@ def test_anti_sybil_signals_privacy_and_restriction_enforcement():
             db.close()
 
         address='0x9999999999999999999999999999999999999999'
-        assert client.post('/api/users/payout-addresses',headers=ah,json={'address':address,'chain':'Avalanche','label':'Wallet A','make_primary':True}).status_code==200
-        assert client.post('/api/users/payout-addresses',headers=bh,json={'address':address,'chain':'Avalanche','label':'Wallet B','make_primary':True}).status_code==200
+        assert client.post('/api/users/payout-addresses',headers=ah,json={'address':address,'chain':'Robinhood','label':'Wallet A','make_primary':True}).status_code==200
+        assert client.post('/api/users/payout-addresses',headers=bh,json={'address':address,'chain':'Robinhood','label':'Wallet B','make_primary':True}).status_code==200
         risk=client.post('/api/risk/evaluate',headers=bh)
         assert risk.status_code==200
         data=risk.json()
@@ -44,22 +44,22 @@ def test_anti_sybil_signals_privacy_and_restriction_enforcement():
         assert any(s['type']=='SHARED_DEVICE_INSTALL' for s in data['signals'])
         assert 'cross-site' in data['privacy_note']
 
-        # Give this test its own fully funded live Bag so it does not depend on
-        # capacity or reward inventory consumed by earlier tests.
+        # Give this test its own fully funded Challenge-based Bag so capacity and
+        # reward inventory cannot be consumed by unrelated tests.
         project=client.post('/api/projects',headers=creator,json={
             'name':'Risk Isolation Project','symbol':'RISKISO',
-            'description':'Isolated project used only to verify anti-Sybil enforcement on earning routes.',
-            'chain':'Avalanche'
+            'description':'Isolated Robinhood Chain project used only to verify anti-Sybil enforcement on earning routes.',
+            'chain':'Robinhood'
         })
         assert project.status_code==200 and project.json()['status']=='LIVE'
         project_id=project.json()['id']
         bag=client.post('/api/campaigns',headers=creator,json={
             'project_id':project_id,'title':'Risk Isolation Bag',
-            'description':'Fresh funded Bag used to test risk enforcement without relying on shared test fixtures.',
+            'description':'Fresh funded Challenge-based Bag used to test risk enforcement without shared fixtures.',
             'category':'LEARN','difficulty':'EASY','reward_asset':'RISKISO','funding_type':'TOKEN',
             'token_allocation':10,'gross_reward_per_user':1,'user_share_pct':80,'nubagz_share_pct':15,
-            'referral_share_pct':5,'max_users':10,
-            'missions':[{'title':'Risk route check','description':'Simple isolated work item for risk-route enrollment testing.','mission_type':'LEARN','verification_type':'SELF_ATTEST','xp_reward':1}]
+            'referral_share_pct':5,'max_users':10,'missions':[],
+            'challenges':[{'title':'Risk route check','description':'Deterministic quiz work item for risk-route enrollment testing.','category':'LEARN','verification_type':'QUIZ','config':{'answer':'risk'},'xp_reward':1}]
         })
         assert bag.status_code==200 and bag.json()['status']=='DRAFT'
         target_id=bag.json()['id']

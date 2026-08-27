@@ -22,7 +22,7 @@ router = APIRouter(prefix="/api/challenges", tags=["bag-work"])
 REFERRAL_ELIGIBLE_LEVELS = {"NORMAL", "VERIFIED"}
 VERIFIED_STATUSES = {"VERIFIED", "APPROVED"}
 PUBLIC_PROJECT_STATUSES = {"LIVE", "APPROVED"}
-SUPPORTED_EVM_CHAINS = {"avalanche", "ethereum", "base", "arbitrum", "polygon"}
+SUPPORTED_EVM_CHAINS = {"robinhood", "avalanche", "ethereum", "base", "arbitrum", "polygon"}
 
 
 def _as_utc(value):
@@ -301,8 +301,9 @@ def _verify_onchain_transaction(
 
     config = dict(challenge.config or {})
     chain = str(config.get("chain") or project.chain or "").strip()
-    if chain.lower() not in SUPPORTED_EVM_CHAINS:
-        raise HTTPException(409, "Automatic on-chain verification currently supports Avalanche, Ethereum, Base, Arbitrum and Polygon")
+    chain_key = "robinhood" if chain.lower() == "robinhood chain" else chain.lower()
+    if chain_key not in SUPPORTED_EVM_CHAINS:
+        raise HTTPException(409, "Automatic on-chain verification currently supports Robinhood, Avalanche, Ethereum, Base, Arbitrum and Polygon")
     target = str(config.get("target_address") or challenge.target_id or "").strip()
     if not target or not target.startswith("0x") or len(target) != 42:
         raise HTTPException(409, "This on-chain Bag Work activity does not have a valid configured target address")

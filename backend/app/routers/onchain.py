@@ -11,12 +11,12 @@ from ..models import User, Project, Campaign, Mission, WalletConnection
 from ..economy_models import OnchainRule, OnchainProof
 
 router = APIRouter(prefix="/api/onchain", tags=["onchain"])
-SUPPORTED_CHAINS = {"avalanche", "ethereum", "base", "arbitrum", "polygon"}
+SUPPORTED_CHAINS = {"robinhood", "avalanche", "ethereum", "base", "arbitrum", "polygon"}
 
 
 class RuleIn(BaseModel):
     mission_id: int
-    chain: str = Field(default="Avalanche", max_length=32)
+    chain: str = Field(default="Robinhood", max_length=32)
     rule_type: str = Field(default="TX_SUCCESS", max_length=40)
     contract_address: str | None = Field(default=None, max_length=255)
     min_amount: Decimal | None = Field(default=None, ge=0)
@@ -30,6 +30,8 @@ class VerifyIn(BaseModel):
 def rpc_url(chain: str) -> str | None:
     key = chain.strip().lower()
     mapping = {
+        "robinhood": settings.evm_rpc_robinhood,
+        "robinhood chain": settings.evm_rpc_robinhood,
         "avalanche": settings.evm_rpc_avalanche,
         "ethereum": settings.evm_rpc_ethereum,
         "base": settings.evm_rpc_base,
@@ -94,7 +96,10 @@ def create_rule(data: RuleIn, db: Session = Depends(get_db), user: User = Depend
     allowed = {"TX_SUCCESS", "CONTRACT_INTERACTION", "NATIVE_BALANCE", "ERC20_BALANCE"}
     if rule_type not in allowed:
         raise HTTPException(400, "Unsupported on-chain rule type")
-    if data.chain.strip().lower() not in SUPPORTED_CHAINS:
+    chain_key = data.chain.strip().lower()
+    if chain_key == "robinhood chain":
+        chain_key = "robinhood"
+    if chain_key not in SUPPORTED_CHAINS:
         raise HTTPException(400, "Unsupported EVM chain")
     if rule_type in {"CONTRACT_INTERACTION", "ERC20_BALANCE"} and not data.contract_address:
         raise HTTPException(400, "This rule type requires a contract address")
@@ -108,7 +113,7 @@ def create_rule(data: RuleIn, db: Session = Depends(get_db), user: User = Depend
     if not rule:
         rule = OnchainRule(mission_id=mission.id, created_by_id=user.id)
         db.add(rule)
-    rule.chain = data.chain.strip().title() if data.chain.strip().lower() != "arbitrum" else "Arbitrum"
+    rule.chain = "Robinhood" if chain_key == "robinhood" else data.chain.strip().title()
     rule.rule_type = rule_type
     rule.contract_address = data.contract_address
     rule.min_amount = data.min_amount
