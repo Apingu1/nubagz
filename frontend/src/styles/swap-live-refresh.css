@@ -10,6 +10,11 @@
   color:#f5f7fb;
 }
 
+.trade-composer,.swap-box{overflow:visible}
+.swap-box:has(.swap-token-field.open){z-index:90}
+.swap-token-field.open{z-index:100}
+.swap-token-field.open .token-menu{z-index:120}
+
 .trade-value-line{
   display:flex;
   align-items:baseline;
