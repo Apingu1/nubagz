@@ -41,10 +41,56 @@ jobs:
       - name: Build production frontend container
         run: docker build -t nubagz-frontend-ci .
 
+  runtime-safety:
+    name: Phase 0 runtime safety checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate Bash safety scripts
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n run_stack.sh
+          for script in scripts/*.sh; do
+            echo "syntax: ${script}"
+            bash -n "$script"
+          done
+
+      - name: Verify local secrets and backups are ignored
+        shell: bash
+        run: |
+          set -euo pipefail
+          touch .env
+          mkdir -p backups
+          touch backups/ci-safety.dump
+          git check-ignore -q .env
+          git check-ignore -q backups/ci-safety.dump
+          rm -f .env backups/ci-safety.dump
+
+      - name: Exercise environment bootstrap without printing secrets
+        shell: bash
+        env:
+          ZEROX_API_KEY: ci-placeholder-0x-key
+          LIFI_API_KEY: ci-placeholder-lifi-key
+          NUBAGZ_SWAP_FEE_RECIPIENT: '0x1111111111111111111111111111111111111111'
+        run: |
+          set -euo pipefail
+          bash scripts/bootstrap_env.sh
+          test -f .env
+          grep -q '^ZEROX_API_KEY=' .env
+          grep -q '^LIFI_API_KEY=' .env
+          grep -q '^NUBAGZ_SWAP_FEE_RECIPIENT=' .env
+          git check-ignore -q .env
+
+      - name: Run non-destructive runtime preflight
+        shell: bash
+        run: bash scripts/runtime_check.sh --preflight
+
   runtime-smoke:
     name: production runtime smoke test
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    needs: [backend, frontend, runtime-safety]
     steps:
       - uses: actions/checkout@v4
 
@@ -71,6 +117,17 @@ jobs:
           test "$health_code" = "200"
           grep -q '<title>NuBagz' /tmp/nubagz-root.html
           grep -q '"status":"ok"' /tmp/nubagz-health.json
+
+      - name: Verify Phase 0 database checkpoint path
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash scripts/backup_db.sh CI_RUNTIME
+          dump="$(find backups -maxdepth 1 -type f -name '*.dump' | head -n 1)"
+          test -n "$dump"
+          test -s "$dump"
+          test -s "${dump}.sha256"
+          bash scripts/verify_backup.sh "$dump"
 
       - name: Verify SPA routes and exact premium mascot assets
         shell: bash
@@ -110,6 +167,7 @@ jobs:
         if: failure()
         run: docker compose logs --no-color --tail=250
 
-      - name: Stop production stack
+      - name: Stop disposable CI production stack
         if: always()
+        # CI uses a disposable database volume, so removing it here is intentional.
         run: docker compose down -v --remove-orphans

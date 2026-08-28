@@ -21,12 +21,23 @@ See `ECONOMY_SETUP.md` for external provider setup. Real custody, executable swa
 
 ## Run
 
+For the protected development/runtime path use:
+
 ```bash
-cp .env.example .env
-docker compose up --build
+bash run_stack.sh
 ```
 
+The runner preserves an existing ignored `.env`, performs a non-secret runtime preflight, rebuilds the app containers, and keeps the PostgreSQL named volume intact.
+
 Open `http://localhost:8080`.
+
+Before significant branch/schema updates use:
+
+```bash
+bash scripts/pre_update_check.sh PRE_UPDATE
+```
+
+See `RUNTIME_DATA_SAFETY.md` for environment portability, verified database backups, safe Codespace shutdown and the forward-only NuBagz V2 branch workflow.
 
 ### Seeded development accounts
 

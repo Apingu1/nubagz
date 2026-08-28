@@ -3,6 +3,11 @@
 *.env
 !.env.example
 
+# local runtime/database safety artifacts
+backups/
+*.dump
+*.backup
+
 # python
 __pycache__/
 *.py[cod]
