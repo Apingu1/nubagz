@@ -42,9 +42,10 @@ if [[ ! -s "$tmp_file" ]]; then
   exit 1
 fi
 
-# Validate the custom-format archive through the same Postgres image before
-# declaring it usable.
-if ! docker compose exec -T db pg_restore --list - < "$tmp_file" >/dev/null; then
+# pg_restore reads a custom-format archive from stdin when no archive filename
+# is supplied. Passing '-' is not portable here: PostgreSQL treats it as a
+# literal file named '-', so deliberately omit the filename argument.
+if ! docker compose exec -T db pg_restore --list < "$tmp_file" >/dev/null; then
   echo '[ERROR] pg_restore could not read the generated archive. Backup rejected.' >&2
   exit 1
 fi
