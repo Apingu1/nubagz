@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from ..challenge_models import Challenge
 from ..db import get_db
 from ..deps import get_current_user, require_admin
 from ..engagement_models import DisputeMessage, ProjectReview, SafetyReport
@@ -30,25 +31,32 @@ class ResolutionIn(BaseModel):
 
 
 def target_owner(target_type: str, target_id: int, db: Session):
-    """Resolve current targets plus historical REVIEW cases already in the DB."""
+    """Resolve V2 targets while retaining historical Campaign/Review cases."""
     kind = target_type.upper()
     if kind == "PROJECT":
         project = db.get(Project, target_id)
         if not project:
             raise HTTPException(404, "Project not found")
         return project.owner_id, project
+    if kind == "CHALLENGE":
+        challenge = db.get(Challenge, target_id)
+        campaign = db.get(Campaign, challenge.campaign_id) if challenge else None
+        project = db.get(Project, campaign.project_id) if campaign else None
+        if not challenge or not campaign or not project:
+            raise HTTPException(404, "Challenge not found")
+        return project.owner_id, challenge
     if kind == "CAMPAIGN":
         campaign = db.get(Campaign, target_id)
         project = db.get(Project, campaign.project_id) if campaign else None
         if not campaign or not project:
-            raise HTTPException(404, "Campaign not found")
+            raise HTTPException(404, "Historical campaign not found")
         return project.owner_id, campaign
     if kind == "REVIEW":
         review = db.get(ProjectReview, target_id)
         if not review:
             raise HTTPException(404, "Historical review not found")
         return review.user_id, review
-    raise HTTPException(400, "Report target must be PROJECT or CAMPAIGN")
+    raise HTTPException(400, "Report target must be PROJECT or CHALLENGE")
 
 
 def can_access(row: SafetyReport, user: User, db: Session):
@@ -104,8 +112,8 @@ def create_report(
     user: User = Depends(get_current_user),
 ):
     kind = data.target_type.upper()
-    if kind not in {"PROJECT", "CAMPAIGN"}:
-        raise HTTPException(400, "Report target must be PROJECT or CAMPAIGN")
+    if kind not in {"PROJECT", "CHALLENGE", "CAMPAIGN"}:
+        raise HTTPException(400, "Report target must be PROJECT or CHALLENGE")
     category = data.category.upper()
     target_owner(kind, data.target_id, db)
     duplicate = db.query(SafetyReport).filter(
@@ -184,7 +192,8 @@ def add_message(
         raise HTTPException(404, "Report not found")
     if row.status in {"RESOLVED", "DISMISSED"}:
         raise HTTPException(409, "This case is closed")
-    db.add(DisputeMessage(report_id=row.id, author_id=user.id, message=data.message))
+    db.add(DisputeMessage(report_id=row.id, author_id=user.id, message=data.message)
+    )
     db.commit()
     return serialize(row, db, user)
 
@@ -205,18 +214,23 @@ def resolve_report(
     action = data.action.upper()
     if status not in {"RESOLVED", "DISMISSED"}:
         raise HTTPException(400, "Resolution status must be RESOLVED or DISMISSED")
-    if action not in {"NONE", "SUSPEND_PROJECT", "SUSPEND_CAMPAIGN"}:
+    if action not in {"NONE", "SUSPEND_PROJECT", "SUSPEND_CHALLENGE", "SUSPEND_CAMPAIGN"}:
         raise HTTPException(400, "Invalid resolution action")
     if status == "DISMISSED" and action != "NONE":
         raise HTTPException(400, "Dismissed cases cannot apply a moderation penalty")
     if action == "SUSPEND_PROJECT":
         if row.target_type != "PROJECT":
-            raise HTTPException(400, "SUSPEND_PROJECT requires a project report")
+            raise HTTPException(400, "SUSPEND_PROJECT requires a Project report")
         target = db.get(Project, row.target_id)
+        target.status = "SUSPENDED"
+    elif action == "SUSPEND_CHALLENGE":
+        if row.target_type != "CHALLENGE":
+            raise HTTPException(400, "SUSPEND_CHALLENGE requires a Challenge report")
+        target = db.get(Challenge, row.target_id)
         target.status = "SUSPENDED"
     elif action == "SUSPEND_CAMPAIGN":
         if row.target_type != "CAMPAIGN":
-            raise HTTPException(400, "SUSPEND_CAMPAIGN requires a campaign report")
+            raise HTTPException(400, "SUSPEND_CAMPAIGN is only retained for historical Campaign cases")
         target = db.get(Campaign, row.target_id)
         target.status = "SUSPENDED"
 

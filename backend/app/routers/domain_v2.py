@@ -7,15 +7,18 @@ from sqlalchemy.orm import Session
 
 from ..challenge_models import Challenge, ChallengeCompletion
 from ..db import get_db
-from ..deps import get_current_user
+from ..deps import get_current_user, require_admin
 from ..economy_models import CampaignAccessRule, CampaignFunding
 from ..models import Campaign, Enrollment, Project, User
 from ..schemas import CampaignCreate, ChallengeCreate
 from ..x_verifier import make_x_proof_code
-from .campaigns import create_campaign, funding_available, serialize_campaign
+from .campaigns import create_campaign, funding_available, pause_campaign, publish_campaign, serialize_campaign
 from .challenges import _gas_summary
-from .funding import FundingDeclareIn, declare_funding
+from .funding import FundingDeclareIn, FundingVerifyIn, declare_funding, verify_funding
 from .risk import evaluate_user
+from .watchbag import unwatch as legacy_unwatch
+from .watchbag import watch as legacy_watch
+from .watchbag import watch_status as legacy_watch_status
 
 router = APIRouter(tags=["domain-v2"])
 PUBLIC_PROJECT_STATUSES = {"LIVE", "APPROVED"}
@@ -56,7 +59,30 @@ def _funding_for(db: Session, campaign_id: int) -> CampaignFunding | None:
     return db.query(CampaignFunding).filter(CampaignFunding.campaign_id == campaign_id).first()
 
 
-def _canonical_from_campaign(campaign, challenge, funding: CampaignFunding | None = None) -> dict:
+def _challenge_context(db: Session, challenge_id: int):
+    challenge = db.get(Challenge, challenge_id)
+    campaign = db.get(Campaign, challenge.campaign_id) if challenge else None
+    project = db.get(Project, campaign.project_id) if campaign else None
+    if not challenge or not campaign or not project:
+        raise HTTPException(404, "Challenge not found")
+    return challenge, campaign, project
+
+
+def _require_challenge_manager(db: Session, challenge_id: int, user: User):
+    challenge, campaign, project = _challenge_context(db, challenge_id)
+    if project.owner_id != user.id and user.role != "ADMIN":
+        raise HTTPException(404, "Challenge not found")
+    return challenge, campaign, project
+
+
+def _active_requirement_count(db: Session, campaign_id: int) -> int:
+    return int(db.query(func.count(Challenge.id)).filter(
+        Challenge.campaign_id == campaign_id,
+        Challenge.status == "ACTIVE",
+    ).scalar() or 0)
+
+
+def _canonical_from_campaign(campaign, challenge, funding: CampaignFunding | None = None, linked_requirement_count: int = 1) -> dict:
     gross = Decimal(campaign.gross_reward_per_user)
     user_amount = gross * Decimal(campaign.user_share_pct) / Decimal("100")
     required = gross * Decimal(campaign.max_users)
@@ -74,7 +100,7 @@ def _canonical_from_campaign(campaign, challenge, funding: CampaignFunding | Non
         "target_url": challenge.target_url,
         "target_id": challenge.target_id,
         "config": challenge.config,
-        "xp_reward": challenge.xp_reward,
+        "xp_reward_compat": challenge.xp_reward,
         "position": challenge.position,
         "status": challenge.status,
         "created_at": challenge.created_at,
@@ -85,12 +111,41 @@ def _canonical_from_campaign(campaign, challenge, funding: CampaignFunding | Non
         "nubagz_share_pct": str(campaign.nubagz_share_pct),
         "referral_share_pct": str(campaign.referral_share_pct),
         "max_users": campaign.max_users,
-        "container_status": campaign.status,
+        "challenge_status": campaign.status,
         "funding_status": funding.status if funding else "UNFUNDED",
         "fully_funded": fully_funded,
         "discoverable": bool(campaign.status == "LIVE" and challenge.status == "ACTIVE" and fully_funded),
-        # Explicit compatibility handle. New UI does not present Campaign as a domain object.
-        "legacy_campaign_id": campaign.id,
+        "compatibility_grouped": linked_requirement_count > 1,
+        "linked_requirement_count": linked_requirement_count,
+    }
+
+
+def _canonical_funding(db: Session, challenge: Challenge, campaign: Campaign, project: Project) -> dict:
+    funding = _funding_for(db, campaign.id)
+    required = Decimal(campaign.gross_reward_per_user) * Decimal(campaign.max_users)
+    declared = Decimal(funding.declared_amount) if funding else Decimal("0")
+    verified = Decimal(funding.verified_amount) if funding else Decimal("0")
+    fully_funded = bool(funding and funding.status == "VERIFIED" and verified >= required)
+    linked_count = _active_requirement_count(db, campaign.id)
+    return {
+        "challenge_id": challenge.id,
+        "project_id": project.id,
+        "asset": campaign.reward_asset,
+        "required_amount": str(required),
+        "declared_amount": str(declared),
+        "verified_amount": str(verified),
+        "status": funding.status if funding else "UNFUNDED",
+        "tx_hash": funding.tx_hash if funding else None,
+        "fully_funded": fully_funded,
+        "challenge_status": campaign.status,
+        "discoverable": bool(
+            campaign.status == "LIVE"
+            and challenge.status == "ACTIVE"
+            and project.status in PUBLIC_PROJECT_STATUSES
+            and fully_funded
+        ),
+        "compatibility_grouped": linked_count > 1,
+        "linked_requirement_count": linked_count,
     }
 
 
@@ -114,10 +169,11 @@ def project_challenges(
     for campaign in q.order_by(Campaign.created_at.desc()).all():
         serialized = serialize_campaign(campaign, db)
         funding = _funding_for(db, campaign.id)
+        linked_count = len([row for row in serialized.challenges if row.status == "ACTIVE"])
         for challenge in serialized.challenges:
             if not owner_view and challenge.status != "ACTIVE":
                 continue
-            rows.append(_canonical_from_campaign(serialized, challenge, funding))
+            rows.append(_canonical_from_campaign(serialized, challenge, funding, linked_count))
     return rows
 
 
@@ -166,7 +222,7 @@ def create_project_challenge(
             user,
         )
         funding = _funding_for(db, created.id)
-    return _canonical_from_campaign(created, created.challenges[0], funding)
+    return _canonical_from_campaign(created, created.challenges[0], funding, 1)
 
 
 @router.get("/api/challenges/{challenge_id}")
@@ -175,15 +231,10 @@ def canonical_challenge(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    challenge = db.get(Challenge, challenge_id)
-    campaign = db.get(Campaign, challenge.campaign_id) if challenge else None
-    project = db.get(Project, campaign.project_id) if campaign else None
+    challenge, campaign, project = _challenge_context(db, challenge_id)
     if (
-        not challenge
-        or challenge.status != "ACTIVE"
-        or not campaign
+        challenge.status != "ACTIVE"
         or campaign.status != "LIVE"
-        or not project
         or project.status not in PUBLIC_PROJECT_STATUSES
     ):
         raise HTTPException(404, "Challenge not found")
@@ -196,10 +247,7 @@ def canonical_challenge(
         Enrollment.user_id == user.id,
         Enrollment.campaign_id == campaign.id,
     ).first()
-    active_count = db.query(func.count(Challenge.id)).filter(
-        Challenge.campaign_id == campaign.id,
-        Challenge.status == "ACTIVE",
-    ).scalar() or 0
+    active_count = _active_requirement_count(db, campaign.id)
     completed_count = db.query(func.count(ChallengeCompletion.id)).join(
         Challenge, Challenge.id == ChallengeCompletion.challenge_id,
     ).filter(
@@ -231,14 +279,14 @@ def canonical_challenge(
         "target_id": challenge.target_id,
         "config": {key: value for key, value in (challenge.config or {}).items() if key != "answer"},
         "proof_code": make_x_proof_code(user.id, challenge.id) if social_auto else None,
-        "xp_reward": challenge.xp_reward,
+        "xp_reward_compat": challenge.xp_reward,
         "completion_status": completion.status if completion else None,
         "joined": bool(enrollment),
         "enrollment_status": enrollment.status if enrollment else None,
-        "legacy_grouped": active_count > 1,
+        "compatibility_grouped": active_count > 1,
         "linked_requirement_count": active_count,
         "linked_completed_count": completed_count,
-        "legacy_campaign_id": campaign.id,
+        "compatibility_group_path": f"/app/bagz/{campaign.id}?challenge={challenge.id}" if active_count > 1 else None,
         "available_spots": max(0, campaign.max_users - enrolled_count),
         "minimum_points_compat": access.min_bag_score if access else 0,
         "project_reward": {
@@ -259,15 +307,10 @@ def join_challenge(
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    challenge = db.get(Challenge, challenge_id)
-    campaign = db.get(Campaign, challenge.campaign_id) if challenge else None
-    project = db.get(Project, campaign.project_id) if campaign else None
+    challenge, campaign, project = _challenge_context(db, challenge_id)
     if (
-        not challenge
-        or challenge.status != "ACTIVE"
-        or not campaign
+        challenge.status != "ACTIVE"
         or campaign.status != "LIVE"
-        or not project
         or project.status not in PUBLIC_PROJECT_STATUSES
     ):
         raise HTTPException(404, "Challenge is not live")
@@ -295,3 +338,113 @@ def join_challenge(
     db.commit()
     db.refresh(enrollment)
     return {"ok": True, "joined": True, "status": enrollment.status}
+
+
+@router.get("/api/challenges/{challenge_id}/funding")
+def challenge_funding(
+    challenge_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    challenge, campaign, project = _require_challenge_manager(db, challenge_id, user)
+    return _canonical_funding(db, challenge, campaign, project)
+
+
+@router.post("/api/challenges/{challenge_id}/funding/declare")
+def declare_challenge_funding(
+    challenge_id: int,
+    data: FundingDeclareIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    challenge, campaign, project = _require_challenge_manager(db, challenge_id, user)
+    declare_funding(campaign.id, data, db, user)
+    return _canonical_funding(db, challenge, campaign, project)
+
+
+@router.post("/api/challenges/{challenge_id}/funding/verify")
+def verify_challenge_funding(
+    challenge_id: int,
+    data: FundingVerifyIn,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    challenge, campaign, project = _challenge_context(db, challenge_id)
+    verify_funding(campaign.id, data, db, admin)
+    db.refresh(campaign)
+    return _canonical_funding(db, challenge, campaign, project)
+
+
+@router.post("/api/challenges/{challenge_id}/pause")
+def pause_challenge(
+    challenge_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    challenge, campaign, _ = _require_challenge_manager(db, challenge_id, user)
+    grouped = _active_requirement_count(db, campaign.id) > 1
+    if grouped:
+        raise HTTPException(409, "Pre-V2 grouped records must be managed through their compatibility record until Phase 3")
+    result = pause_campaign(campaign.id, db, user)
+    return {"ok": True, "challenge_id": challenge.id, "status": result["status"]}
+
+
+@router.post("/api/challenges/{challenge_id}/resume")
+def resume_challenge(
+    challenge_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    challenge, campaign, _ = _require_challenge_manager(db, challenge_id, user)
+    grouped = _active_requirement_count(db, campaign.id) > 1
+    if grouped:
+        raise HTTPException(409, "Pre-V2 grouped records must be managed through their compatibility record until Phase 3")
+    result = publish_campaign(campaign.id, db, user)
+    return {"ok": True, "challenge_id": challenge.id, "status": result["status"]}
+
+
+@router.get("/api/challenges/{challenge_id}/watch")
+def challenge_watch_status(
+    challenge_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    challenge, campaign, _ = _challenge_context(db, challenge_id)
+    out = legacy_watch_status(campaign.id, db, user)
+    return {
+        "challenge_id": challenge.id,
+        "watched": out["watched"],
+        "watchable": out["watchable"],
+        "watchability_reason": out["watchability_reason"],
+        "remaining_reward_inventory": out["remaining_reward_inventory"],
+        "reservation": False,
+    }
+
+
+@router.post("/api/challenges/{challenge_id}/watch")
+def watch_challenge(
+    challenge_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    challenge, campaign, _ = _challenge_context(db, challenge_id)
+    out = legacy_watch(campaign.id, db, user)
+    return {
+        "challenge_id": challenge.id,
+        "watched": True,
+        "watchable": out["watchable"],
+        "watchability_reason": out["watchability_reason"],
+        "remaining_reward_inventory": out["remaining_reward_inventory"],
+        "reservation": False,
+    }
+
+
+@router.delete("/api/challenges/{challenge_id}/watch")
+def unwatch_challenge(
+    challenge_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    challenge, campaign, _ = _challenge_context(db, challenge_id)
+    legacy_unwatch(campaign.id, db, user)
+    return {"ok": True, "challenge_id": challenge.id, "watched": False}
