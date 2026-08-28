@@ -6,7 +6,7 @@ import WalletOnboarding from './pages/WalletOnboarding'
 import AppShell from './components/AppShell'
 import Dashboard from './pages/Dashboard'
 import BagWork from './pages/BagWork'
-import BagDetail from './pages/BagDetail'
+import LegacyChallengeGroup from './pages/LegacyChallengeGroup'
 import ChallengeDetail from './pages/ChallengeDetail'
 import Notifications from './pages/Notifications'
 import ActivityFeed from './pages/ActivityFeed'
@@ -53,7 +53,7 @@ export default function App(){return <Routes>
   <Route path="reports" element={<Reports/>}/>
   <Route path="account-trust" element={<AccountTrust/>}/>
   <Route path="challenges/:id" element={<ChallengeDetail/>}/>
-  <Route path="bagz/:id" element={<BagDetail/>}/>
+  <Route path="bagz/:id" element={<LegacyChallengeGroup/>}/>
   <Route path="bag" element={<MyBag/>}/>
   <Route path="earnings" element={<Navigate to="/app/bag?section=rewards" replace/>}/>
   <Route path="referrals" element={<Navigate to="/app/bag?section=invites" replace/>}/>
