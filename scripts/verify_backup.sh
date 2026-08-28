@@ -23,12 +23,14 @@ else
 fi
 
 printf '[NuBagz] Verifying PostgreSQL custom archive structure...\n'
+# pg_restore consumes the archive from stdin when the archive filename is
+# omitted. Do not pass '-' because pg_restore treats it as a literal filename.
 if docker compose ps --status running --services 2>/dev/null | grep -qx 'db'; then
-  docker compose exec -T db pg_restore --list - < "$backup" >/dev/null
+  docker compose exec -T db pg_restore --list < "$backup" >/dev/null
 else
   # Verification does not need database access. Use the same Postgres major
   # version in an isolated disposable container when the NuBagz DB is stopped.
-  docker run --rm -i postgres:16-alpine pg_restore --list - < "$backup" >/dev/null
+  docker run --rm -i postgres:16-alpine pg_restore --list < "$backup" >/dev/null
 fi
 
 printf '[OK] Backup checksum/archive verification passed: %s\n' "$backup"
