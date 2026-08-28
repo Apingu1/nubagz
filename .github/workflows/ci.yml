@@ -118,7 +118,7 @@ jobs:
           grep -q '<title>NuBagz' /tmp/nubagz-root.html
           grep -q '"status":"ok"' /tmp/nubagz-health.json
 
-      - name: Verify Phase 0 database checkpoint path
+      - name: Verify database checkpoint path
         shell: bash
         run: |
           set -euo pipefail
@@ -129,12 +129,12 @@ jobs:
           test -s "${dump}.sha256"
           bash scripts/verify_backup.sh "$dump"
 
-      - name: Verify SPA routes and exact premium mascot assets
+      - name: Verify V2 SPA routes and exact premium mascot assets
         shell: bash
         run: |
           set -euo pipefail
 
-          for route in / /login /register /discover /my-bag /project-trust; do
+          for route in / /login /register /app /app/work /app/bag /app/trust /app/studio /app/swaps; do
             code="$(curl -sS -o /tmp/spa-route.html -w '%{http_code}' "http://127.0.0.1:8080${route}")"
             echo "${route} -> ${code}"
             test "$code" = "200"
