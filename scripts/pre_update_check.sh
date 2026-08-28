@@ -13,15 +13,17 @@ bash scripts/runtime_check.sh
 if command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
   status="$(git status --short)"
   if [[ -n "$status" ]]; then
-    printf '\n[WARN] Working tree has tracked/untracked changes:\n%s\n' "$status"
-    printf 'Review these before switching branches or pulling architecture changes.\n'
-  else
-    printf '\n[OK] Git working tree is clean.\n'
+    printf '\n[ERROR] Working tree is not clean:\n%s\n' "$status" >&2
+    printf '\nCommit, stash, or deliberately remove these changes before switching/pulling a NuBagz V2 branch.\n' >&2
+    printf 'The safety checkpoint has stopped; no source switch should be performed yet.\n' >&2
+    exit 1
   fi
+  printf '\n[OK] Git working tree is clean.\n'
 fi
 
 printf '\n[NuBagz] Creating a verified database checkpoint...\n'
 bash scripts/backup_db.sh "$label"
 
 printf '\n[OK] Pre-update checkpoint complete.\n'
-printf 'You can now pull/switch to the next forward NuBagz V2 branch.\n'
+printf 'The runtime passed, Git is clean, and a verified database backup now exists.\n'
+printf 'You can safely perform the planned forward branch switch/pull.\n'
