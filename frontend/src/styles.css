@@ -14,6 +14,4 @@
 @import './styles/integrity.css';
 @import './styles/swap-platform.css';
 @import './styles/swap-live-refresh.css';
-
-/* NuBagz V2 Phase 1A: Points is the sole leaderboard ranking metric. */
-.leader-head.phase1-points-grid,.leader-row.phase1-points-grid{grid-template-columns:70px 1fr 180px 120px}
+@import './styles/phase1-v2.css';
