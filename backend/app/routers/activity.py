@@ -3,6 +3,7 @@ from datetime import UTC
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
+from ..challenge_models import Challenge
 from ..db import get_db
 from ..deps import get_current_user
 from ..economy_models import BagDrop, BagDropClaim
@@ -52,15 +53,20 @@ def activity_feed(
             project = db.get(Project, campaign.project_id) if campaign else None
             if not visible_user(user) or not visible_project(project) or not campaign or campaign.status not in {"LIVE", "COMPLETED"}:
                 continue
+            challenge_rows = db.query(Challenge).filter(
+                Challenge.campaign_id == campaign.id,
+                Challenge.status == "ACTIVE",
+            ).order_by(Challenge.position.asc(), Challenge.id.asc()).all()
+            link_path = f"/app/challenges/{challenge_rows[0].id}" if len(challenge_rows) == 1 else f"/app/bagz/{campaign.id}"
             events.append({
                 "event_id": f"completion:{enrollment.id}",
                 "event_type": "BAG_COMPLETED",
                 "username": user.username,
                 "headline": f"{user.username} completed {campaign.title}",
-                "detail": f"Bagged {campaign.reward_asset} through verified Bag Work from {project.name}.",
+                "detail": f"Earned {campaign.reward_asset} through verified Challenge participation from {project.name}.",
                 "project_name": project.name,
                 "campaign_id": campaign.id,
-                "link_path": f"/app/bagz/{campaign.id}",
+                "link_path": link_path,
                 "occurred_at": iso(enrollment.completed_at),
             })
 

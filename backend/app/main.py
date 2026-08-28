@@ -10,7 +10,7 @@ from .challenge_models import Challenge, ChallengeCompletion
 from .config import settings
 from .db import Base, SessionLocal, engine
 from .models import Campaign, Mission, MissionCompletion, Project
-from .routers import access, activity, admin, auth, bagdrops, bounties, campaigns, challenges, creator, daily, earnings, funding, gas, notifications, onchain, prices, project_analytics, projects, recommendations, referrals, reports, revenue_share, reviews, risk, swaps, templates, trending, trust, users, watchbag
+from .routers import access, activity, admin, auth, bagdrops, bounties, campaigns, challenges, creator, daily, domain_v2, earnings, funding, gas, notifications, onchain, prices, project_analytics, projects, recommendations, referrals, reports, revenue_share, reviews, risk, swaps, templates, trending, trust, users, watchbag
 from .seed import seed_demo
 
 
@@ -147,7 +147,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="1.29.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.30.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -159,11 +159,11 @@ for router in (
     auth, projects, campaigns, users, admin, funding, earnings, prices, bagdrops,
     daily, onchain, trust, access, risk, referrals, bounties, revenue_share,
     recommendations, notifications, project_analytics, templates, reviews, reports,
-    activity, trending, watchbag, swaps, gas, challenges, creator,
+    activity, trending, watchbag, swaps, gas, challenges, domain_v2, creator,
 ):
     app.include_router(router.router)
 
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "nubagz-api", "version": "1.29.0"}
+    return {"status": "ok", "service": "nubagz-api", "version": "1.30.0"}
