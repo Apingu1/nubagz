@@ -118,6 +118,7 @@ def test_phase1_complete_project_challenge_reward_flow_uses_canonical_surfaces()
         )
         assert submitted.status_code == 200
         assert submitted.json()['status'] == 'PENDING'
+        assert submitted.json()['reward_status'] is None
 
         queue = client.get('/api/challenges/submissions/project', headers=creator)
         assert queue.status_code == 200
@@ -129,6 +130,7 @@ def test_phase1_complete_project_challenge_reward_flow_uses_canonical_surfaces()
         )
         assert decision.status_code == 200
         assert decision.json()['completed'] is True
+        assert decision.json()['reward_status'] == 'PENDING_SETTLEMENT'
 
         after = client.get(f'/api/challenges/{challenge_id}', headers=participant)
         assert after.status_code == 200
@@ -138,8 +140,23 @@ def test_phase1_complete_project_challenge_reward_flow_uses_canonical_surfaces()
 
         earnings = client.get('/api/earnings/summary', headers=participant)
         assert earnings.status_code == 200
-        lifetime = {row['asset']: float(row['amount']) for row in earnings.json()['lifetime']}
+        payload = earnings.json()
+        lifetime = {row['asset']: float(row['amount']) for row in payload['lifetime']}
+        available = {row['asset']: float(row['amount']) for row in payload['available']}
+        pending_settlement = {row['asset']: float(row['amount']) for row in payload['pending_settlement']}
         assert lifetime['P1END'] == 80.0
+        assert available.get('P1END', 0) == 0
+        assert pending_settlement['P1END'] == 80.0
+
+        withdrawal = client.post('/api/users/withdrawals', headers=participant, json={
+            'asset_symbol': 'P1END',
+            'amount': 1,
+            'chain': 'Avalanche',
+            'wallet_address': '0x1111111111111111111111111111111111111111',
+        })
+        # Pending settlement is not withdrawable; a saved reward destination is
+        # deliberately irrelevant to the available-balance gate here.
+        assert withdrawal.status_code == 400
 
         activity = client.get('/api/activity', headers=participant)
         assert activity.status_code == 200
