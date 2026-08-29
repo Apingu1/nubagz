@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     jwt_private_key: str | None = None
     jwt_public_key: str | None = None
     jwt_key_id: str = "nubagz-1"
+    jwt_audience: str = "nubagz-api"
     access_token_minutes: int = 1440
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     privy_app_id: str | None = None
