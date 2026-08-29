@@ -18,11 +18,12 @@ services:
     environment:
       ENVIRONMENT: production
       DATABASE_URL: postgresql+psycopg://nubagz:nubagz@db:5432/nubagz
-      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me-before-production}
-      JWT_ALGORITHM: ${JWT_ALGORITHM:-HS256}
+      JWT_SECRET: ${JWT_SECRET:-}
+      JWT_ALGORITHM: ${JWT_ALGORITHM:-RS256}
       JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
       JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
       JWT_KEY_ID: ${JWT_KEY_ID:-nubagz-1}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-nubagz-api}
       CORS_ORIGINS: http://localhost:8080,http://127.0.0.1:8080
       PRIVY_APP_ID: ${PRIVY_APP_ID:-}
       PRIVY_VERIFICATION_KEY: ${PRIVY_VERIFICATION_KEY:-}
