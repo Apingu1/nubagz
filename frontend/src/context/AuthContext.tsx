@@ -32,7 +32,7 @@ export function AuthProvider({children}:{children:ReactNode}){
   const login=async(email:string,password:string)=>{ const r=await api<{access_token:string;user:User}>('/auth/login',{method:'POST',body:JSON.stringify({email,password})});storeSession(r,'password') }
   const register=async(email:string,username:string,password:string,referral_code?:string)=>{ const r=await api<{access_token:string;user:User}>('/auth/register',{method:'POST',body:JSON.stringify({email,username,password,referral_code:referral_code||null})});storeSession(r,'password') }
   const socialLogin=async(identity_token:string,referral_code?:string)=>{const r=await api<{access_token:string;user:User}>('/auth/privy',{method:'POST',body:JSON.stringify({identity_token,referral_code:referral_code||null})});storeSession(r,'privy')}
-  const logout=()=>{localStorage.removeItem('nubagz_token');localStorage.removeItem(SOURCE_KEY);setAuthSource(null);setUser(null)}
+  const logout=()=>{if(localStorage.getItem('nubagz_token'))void api('/auth/logout',{method:'POST'}).catch(()=>{});localStorage.removeItem('nubagz_token');localStorage.removeItem(SOURCE_KEY);setAuthSource(null);setUser(null)}
   const value=useMemo(()=>({user,loading,authSource,login,register,socialLogin,logout,refresh}),[user,loading,authSource])
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
