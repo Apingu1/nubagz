@@ -35,6 +35,7 @@ class UserOut(BaseModel):
     bag_score: int
     streak_days: int
     referral_code: str
+    account_state: str
     wallet_address: str | None
     wallet_chain: str | None
     created_at: datetime
@@ -60,11 +61,6 @@ class SocialAccountOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class WalletUpdate(BaseModel):
-    wallet_address: str = Field(min_length=8, max_length=255)
-    wallet_chain: str = Field(min_length=2, max_length=32)
-
-
 class WalletChallengeIn(BaseModel):
     address: str = Field(pattern=r"^0x[a-fA-F0-9]{40}$")
 
@@ -88,6 +84,7 @@ class WalletConnectionOut(BaseModel):
     connector_type: str
     wallet_type: str
     is_primary: bool
+    is_primary_interactive: bool
     verified_at: datetime | None
     last_connected_at: datetime
     created_at: datetime
