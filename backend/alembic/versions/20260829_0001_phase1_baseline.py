@@ -6,7 +6,7 @@ Revises: None
 from alembic import op
 
 from app.db import Base
-from app import challenge_models, economy_models, engagement_models, integration_models, marketplace_models, models, risk_models, trust_models  # noqa: F401
+from app import challenge_models, economy_models, engagement_models, integration_models, marketplace_models, models, risk_models, security_models, trust_models  # noqa: F401
 
 revision = "20260829_0001"
 down_revision = None
