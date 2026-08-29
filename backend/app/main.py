@@ -133,6 +133,7 @@ def backfill_legacy_missions_to_challenges(db):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    settings.validate_runtime_security()
     Base.metadata.create_all(bind=engine)
     ensure_runtime_schema()
     db = SessionLocal()
