@@ -5,7 +5,7 @@ from sqlalchemy import engine_from_config, pool
 
 from app.config import settings
 from app.db import Base
-from app import challenge_models, economy_models, engagement_models, integration_models, marketplace_models, models, risk_models, trust_models  # noqa: F401
+from app import challenge_models, economy_models, engagement_models, integration_models, marketplace_models, models, risk_models, security_models, trust_models  # noqa: F401
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
