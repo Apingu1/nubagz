@@ -61,5 +61,15 @@ class Settings(BaseSettings):
     def swap_fee_bps(self) -> int:
         return max(0, min(int(self.nubagz_swap_fee_bps), 1000))
 
+    def validate_runtime_security(self) -> None:
+        if self.environment.lower() != "production":
+            return
+        if self.jwt_algorithm.upper() != "RS256":
+            raise RuntimeError("Production NuBagz must use JWT_ALGORITHM=RS256")
+        if not (self.jwt_private_key or "").strip() or not (self.jwt_public_key or "").strip():
+            raise RuntimeError("Production NuBagz requires JWT_PRIVATE_KEY and JWT_PUBLIC_KEY")
+        if not (self.jwt_audience or "").strip():
+            raise RuntimeError("Production NuBagz requires JWT_AUDIENCE")
+
 
 settings = Settings()
