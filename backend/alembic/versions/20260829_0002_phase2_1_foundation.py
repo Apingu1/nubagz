@@ -63,6 +63,34 @@ def upgrade() -> None:
         if "ix_wallet_connections_is_primary_interactive" not in _indexes("wallet_connections"):
             op.create_index("ix_wallet_connections_is_primary_interactive", "wallet_connections", ["is_primary_interactive"], unique=False)
 
+    # Backfill a canonical Privy DID only where the historical provider rows are
+    # internally unambiguous. Ambiguous legacy data remains unbound for later
+    # audited recovery review rather than being guessed during migration.
+    tables = set(inspect(op.get_bind()).get_table_names())
+    if "privy_identity_bindings" in tables and "social_accounts" in tables:
+        op.execute("""
+            INSERT INTO privy_identity_bindings (user_id, privy_user_id, created_at, last_verified_at)
+            SELECT s.user_id,
+                   MIN(s.privy_user_id),
+                   MIN(s.connected_at),
+                   MAX(s.last_verified_at)
+            FROM social_accounts s
+            WHERE s.privy_user_id IS NOT NULL
+              AND s.privy_user_id <> ''
+              AND NOT EXISTS (
+                  SELECT 1 FROM social_accounts other
+                  WHERE other.privy_user_id = s.privy_user_id
+                    AND other.user_id <> s.user_id
+              )
+              AND NOT EXISTS (
+                  SELECT 1 FROM privy_identity_bindings existing
+                  WHERE existing.user_id = s.user_id
+                     OR existing.privy_user_id = s.privy_user_id
+              )
+            GROUP BY s.user_id
+            HAVING COUNT(DISTINCT s.privy_user_id) = 1
+        """)
+
     # The Phase 1 compatibility ledger recorded approved Project Rewards as
     # AVAILABLE even though no blockchain settlement existed. Preserve the
     # earned record but make its state truthful until Phase 9 settlement.
