@@ -22,10 +22,11 @@ import CreatorStudio from './pages/CreatorStudio'
 import CreateProject from './pages/CreateProject'
 import CreateChallenge from './pages/CreateChallenge'
 import Admin from './pages/Admin'
+import AdminUsers from './pages/AdminUsers'
 import { useAuth } from './context/AuthContext'
 
 function Protected({children}:{children:ReactNode}){const {user,loading}=useAuth();if(loading)return <div className="boot">NUBAGZ<span>↗</span></div>;return user?<>{children}</>:<Navigate to="/login" replace/>}
-function AdminOnly(){const {user}=useAuth();return user?.role==='ADMIN'?<Admin/>:<Navigate to="/app" replace/>}
+function AdminOnly({children}:{children:ReactNode}){const {user}=useAuth();return user?.role==='ADMIN'?<>{children}</>:<Navigate to="/app" replace/>}
 function LegacyChallengeBuilderRedirect(){const location=useLocation();return <Navigate to={`/app/studio/challenges/new${location.search}`} replace/>}
 
 export default function App(){return <Routes>
@@ -65,7 +66,9 @@ export default function App(){return <Routes>
   <Route path="studio/projects/new" element={<CreateProject/>}/>
   <Route path="studio/challenges/new" element={<CreateChallenge/>}/>
   <Route path="studio/campaigns/new" element={<LegacyChallengeBuilderRedirect/>}/>
-  <Route path="admin" element={<AdminOnly/>}/>
+  <Route path="admin" element={<AdminOnly><Admin/></AdminOnly>}/>
+  <Route path="admin/users" element={<AdminOnly><AdminUsers/></AdminOnly>}/>
+  <Route path="admin/users/:userId" element={<AdminOnly><AdminUsers/></AdminOnly>}/>
  </Route>
  <Route path="*" element={<Navigate to="/"/>}/>
  </Routes>}
