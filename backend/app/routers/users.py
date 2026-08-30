@@ -1,18 +1,31 @@
 from datetime import datetime, timedelta, UTC
 from decimal import Decimal
 import secrets
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import func
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from sqlalchemy.orm import Session
+from ..abuse_models import SecurityEvent
 from ..admin_user_models import UserRewardHold
 from ..db import get_db
 from ..deps import get_current_user
 from ..models import User, LedgerEntry, Enrollment, Withdrawal, WalletConnection, WalletChallenge, PayoutAddress
 from ..schemas import DashboardOut, RewardBalance, WithdrawalIn, WalletChallengeIn, WalletVerifyIn, WalletConnectionOut, PayoutAddressIn, PayoutAddressOut
+from ..security_hardening import hash_network_identifier, trusted_client_ip
 
 router = APIRouter(prefix="/api/users", tags=["users"])
+
+
+def _security_event(db: Session, request: Request, user: User, event_type: str, detail: str) -> None:
+    db.add(SecurityEvent(
+        user_id=user.id,
+        ip_hash=hash_network_identifier(trusted_client_ip(request)),
+        event_type=event_type[:64],
+        route_group="WALLET",
+        detail=detail[:2000],
+        created_at=datetime.now(UTC),
+    ))
 
 
 def _select_reward_wallet(db: Session, user: User, wallet: WalletConnection) -> None:
@@ -74,7 +87,7 @@ def wallet_challenge(data:WalletChallengeIn, db:Session=Depends(get_db), user:Us
 
 
 @router.post("/wallets/verify",response_model=WalletConnectionOut)
-def verify_wallet(data:WalletVerifyIn, db:Session=Depends(get_db), user:User=Depends(get_current_user)):
+def verify_wallet(data:WalletVerifyIn, request:Request, db:Session=Depends(get_db), user:User=Depends(get_current_user)):
     challenge=db.query(WalletChallenge).filter(WalletChallenge.id==data.challenge_id,WalletChallenge.user_id==user.id).first(); now_dt=datetime.now(UTC)
     if not challenge or challenge.used_at is not None: raise HTTPException(400,"Wallet verification challenge is invalid or already used")
     expires=challenge.expires_at.replace(tzinfo=UTC) if challenge.expires_at.tzinfo is None else challenge.expires_at
@@ -84,6 +97,7 @@ def verify_wallet(data:WalletVerifyIn, db:Session=Depends(get_db), user:User=Dep
     except Exception as exc: raise HTTPException(400,"Wallet signature could not be verified") from exc
     if recovered.lower()!=data.address.lower(): raise HTTPException(400,"Wallet signature does not match this address")
     wallet=db.query(WalletConnection).filter(WalletConnection.user_id==user.id,func.lower(WalletConnection.address)==data.address.lower()).first()
+    created=wallet is None
     if not wallet: wallet=WalletConnection(user_id=user.id,address=data.address); db.add(wallet); db.flush()
     wallet.chain_type="ethereum"; wallet.chain_id=data.chain_id; wallet.wallet_client_type=data.wallet_client_type or "unknown"; wallet.connector_type=data.connector_type or "unknown"; wallet.wallet_type="EMBEDDED" if wallet.wallet_client_type=="privy" else "EXTERNAL"; wallet.verified_at=now_dt; wallet.last_connected_at=now_dt; challenge.used_at=now_dt
     current_interactive=db.query(WalletConnection).filter(WalletConnection.user_id==user.id,WalletConnection.is_primary_interactive.is_(True),WalletConnection.verified_at.isnot(None)).first()
@@ -92,24 +106,32 @@ def verify_wallet(data:WalletVerifyIn, db:Session=Depends(get_db), user:User=Dep
     # Preserve the onboarding convenience without conflating the two roles:
     # the first verified wallet may become the reward destination, but later
     # payout-only changes never unset the independently selected signer.
+    reward_selected=False
     if not user.wallet_address:
-        _select_reward_wallet(db,user,wallet)
+        _select_reward_wallet(db,user,wallet);reward_selected=True
+    _security_event(db,request,user,"WALLET_VERIFIED",f"Wallet {wallet.address} {'created and ' if created else ''}verified by signature. Interactive signer: {bool(wallet.is_primary_interactive)}. Reward destination: {bool(wallet.is_primary or reward_selected)}.")
     db.commit(); db.refresh(wallet); return wallet
 
 
 @router.post("/wallets/{wallet_id}/interactive-primary")
-def make_wallet_interactive_primary(wallet_id:int, db:Session=Depends(get_db), user:User=Depends(get_current_user)):
+def make_wallet_interactive_primary(wallet_id:int, request:Request, db:Session=Depends(get_db), user:User=Depends(get_current_user)):
     wallet=db.query(WalletConnection).filter(WalletConnection.id==wallet_id,WalletConnection.user_id==user.id,WalletConnection.verified_at.isnot(None)).first()
     if not wallet: raise HTTPException(404,"Verified wallet not found")
-    _select_interactive_wallet(db,user,wallet); db.commit()
+    previous=db.query(WalletConnection).filter(WalletConnection.user_id==user.id,WalletConnection.is_primary_interactive.is_(True)).first()
+    _select_interactive_wallet(db,user,wallet)
+    _security_event(db,request,user,"INTERACTIVE_SIGNER_CHANGED",f"Interactive signer changed from {previous.address if previous else 'none'} to {wallet.address}.")
+    db.commit()
     return {"ok":True,"wallet_id":wallet.id,"role":"INTERACTIVE_SIGNER"}
 
 
 @router.post("/wallets/{wallet_id}/primary")
-def make_wallet_primary(wallet_id:int, db:Session=Depends(get_db), user:User=Depends(get_current_user)):
+def make_wallet_primary(wallet_id:int, request:Request, db:Session=Depends(get_db), user:User=Depends(get_current_user)):
     wallet=db.query(WalletConnection).filter(WalletConnection.id==wallet_id,WalletConnection.user_id==user.id,WalletConnection.verified_at.isnot(None)).first()
     if not wallet: raise HTTPException(404,"Verified wallet not found")
-    _select_reward_wallet(db,user,wallet); db.commit()
+    previous=user.wallet_address
+    _select_reward_wallet(db,user,wallet)
+    _security_event(db,request,user,"REWARD_DESTINATION_CHANGED",f"Reward destination changed from {previous or 'none'} to verified wallet {wallet.address}.")
+    db.commit()
     return {"ok":True,"wallet_id":wallet.id,"role":"REWARD_DESTINATION"}
 
 
@@ -119,21 +141,32 @@ def payout_addresses(db:Session=Depends(get_db), user:User=Depends(get_current_u
 
 
 @router.post("/payout-addresses",response_model=PayoutAddressOut)
-def add_payout_address(data:PayoutAddressIn, db:Session=Depends(get_db), user:User=Depends(get_current_user)):
+def add_payout_address(data:PayoutAddressIn, request:Request, db:Session=Depends(get_db), user:User=Depends(get_current_user)):
     existing=db.query(PayoutAddress).filter(PayoutAddress.user_id==user.id,PayoutAddress.chain==data.chain,PayoutAddress.address==data.address).first()
     if existing:
         if data.make_primary:
-            db.query(PayoutAddress).filter(PayoutAddress.user_id==user.id).update({PayoutAddress.is_primary:False}); db.query(WalletConnection).filter(WalletConnection.user_id==user.id).update({WalletConnection.is_primary:False}); existing.is_primary=True; user.wallet_address=existing.address; user.wallet_chain=existing.chain; db.commit(); db.refresh(existing)
+            previous=user.wallet_address
+            db.query(PayoutAddress).filter(PayoutAddress.user_id==user.id).update({PayoutAddress.is_primary:False}); db.query(WalletConnection).filter(WalletConnection.user_id==user.id).update({WalletConnection.is_primary:False}); existing.is_primary=True; user.wallet_address=existing.address; user.wallet_chain=existing.chain
+            _security_event(db,request,user,"REWARD_DESTINATION_CHANGED",f"Reward destination changed from {previous or 'none'} to payout-only address {existing.address} on {existing.chain}.")
+            db.commit(); db.refresh(existing)
         return existing
     payout=PayoutAddress(user_id=user.id,address=data.address,chain=data.chain,label=data.label,verification_status="UNVERIFIED")
     db.add(payout); db.flush()
+    selected=False
+    previous=user.wallet_address
     if data.make_primary or not user.wallet_address:
-        db.query(PayoutAddress).filter(PayoutAddress.user_id==user.id).update({PayoutAddress.is_primary:False}); db.query(WalletConnection).filter(WalletConnection.user_id==user.id).update({WalletConnection.is_primary:False}); payout.is_primary=True; user.wallet_address=data.address; user.wallet_chain=data.chain
+        db.query(PayoutAddress).filter(PayoutAddress.user_id==user.id).update({PayoutAddress.is_primary:False}); db.query(WalletConnection).filter(WalletConnection.user_id==user.id).update({WalletConnection.is_primary:False}); payout.is_primary=True; user.wallet_address=data.address; user.wallet_chain=data.chain;selected=True
+    _security_event(db,request,user,"PAYOUT_ADDRESS_ADDED",f"Payout-only address {payout.address} added on {payout.chain}. Selected for rewards: {selected}.")
+    if selected:
+        _security_event(db,request,user,"REWARD_DESTINATION_CHANGED",f"Reward destination changed from {previous or 'none'} to payout-only address {payout.address} on {payout.chain}.")
     db.commit(); db.refresh(payout); return payout
 
 
 @router.post("/payout-addresses/{payout_id}/primary")
-def make_payout_primary(payout_id:int, db:Session=Depends(get_db), user:User=Depends(get_current_user)):
+def make_payout_primary(payout_id:int, request:Request, db:Session=Depends(get_db), user:User=Depends(get_current_user)):
     payout=db.query(PayoutAddress).filter(PayoutAddress.id==payout_id,PayoutAddress.user_id==user.id).first()
     if not payout: raise HTTPException(404,"Payout address not found")
-    db.query(PayoutAddress).filter(PayoutAddress.user_id==user.id).update({PayoutAddress.is_primary:False}); db.query(WalletConnection).filter(WalletConnection.user_id==user.id).update({WalletConnection.is_primary:False}); payout.is_primary=True; user.wallet_address=payout.address; user.wallet_chain=payout.chain; db.commit(); return {"ok":True,"payout_id":payout.id,"role":"REWARD_DESTINATION"}
+    previous=user.wallet_address
+    db.query(PayoutAddress).filter(PayoutAddress.user_id==user.id).update({PayoutAddress.is_primary:False}); db.query(WalletConnection).filter(WalletConnection.user_id==user.id).update({WalletConnection.is_primary:False}); payout.is_primary=True; user.wallet_address=payout.address; user.wallet_chain=payout.chain
+    _security_event(db,request,user,"REWARD_DESTINATION_CHANGED",f"Reward destination changed from {previous or 'none'} to payout-only address {payout.address} on {payout.chain}.")
+    db.commit(); return {"ok":True,"payout_id":payout.id,"role":"REWARD_DESTINATION"}
