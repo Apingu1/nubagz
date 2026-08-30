@@ -69,9 +69,12 @@ def test_complete_creator_to_earner_flow():
 
         final = client.post(f"/api/challenges/{challenges[1]['id']}/complete", headers=earner, json={"answer": "TBAG"})
         assert final.status_code == 200 and final.json()["completed"] is True
+        assert final.json()["reward_status"] == "PENDING_SETTLEMENT"
 
+        # Phase 2.1 records the approved Project Reward without pretending the
+        # blockchain settlement has happened. It must not be withdrawable yet.
         balances = client.get("/api/users/dashboard", headers=earner).json()["balances"]
-        assert any(item["asset_symbol"] == "TBAG" and float(item["amount"]) == 80 for item in balances)
+        assert not any(item["asset_symbol"] == "TBAG" for item in balances)
         treasury = client.get("/api/admin/treasury", headers=admin).json()
         assert any(item["asset"] == "TBAG" and float(item["amount"]) == 20 for item in treasury)
 
@@ -79,8 +82,11 @@ def test_complete_creator_to_earner_flow():
         assert price.status_code == 200
         earnings = client.get("/api/earnings/summary", headers=earner)
         assert earnings.status_code == 200
-        valuation = next(item for item in earnings.json()["valuations"] if item["asset"] == "TBAG")
-        assert float(valuation["current_value_gbp"]) == 8.0
+        summary = earnings.json()
+        pending = next(item for item in summary["pending_settlement"] if item["asset"] == "TBAG")
+        assert float(pending["amount"]) == 80.0
+        valuation = next(item for item in summary["valuations"] if item["asset"] == "TBAG")
+        assert float(valuation["current_value_gbp"]) == 0.0
         assert float(valuation["original_estimated_value_gbp"]) == 8.0
 
         drop = client.post("/api/bagdrops", headers=creator, json={
@@ -99,4 +105,4 @@ def test_complete_creator_to_earner_flow():
         assert claim.status_code == 200
         assert client.post(f"/api/bagdrops/{drop_id}/claim", headers=earner).status_code == 409
         balances = client.get("/api/users/dashboard", headers=earner).json()["balances"]
-        assert any(item["asset_symbol"] == "TBAG" and float(item["amount"]) == 82 for item in balances)
+        assert any(item["asset_symbol"] == "TBAG" and float(item["amount"]) == 2 for item in balances)
