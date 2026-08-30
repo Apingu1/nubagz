@@ -17,6 +17,12 @@ class Settings(BaseSettings):
     privy_verification_key: str | None = None
     social_proof_secret: str | None = None
 
+    # Phase 2.5 privileged Admin security. Keep this key stable and separate
+    # from JWT signing keys so MFA credentials survive normal signing-key rotation.
+    admin_security_key: str | None = None
+    admin_privileged_minutes: int = 10
+    admin_reauth_max_age_seconds: int = 300
+
     # EVM RPCs. Robinhood Chain is the primary NuBagz network. Its official
     # public RPC is useful for development but a dedicated provider is still
     # recommended for production throughput.
@@ -61,6 +67,10 @@ class Settings(BaseSettings):
     def swap_fee_bps(self) -> int:
         return max(0, min(int(self.nubagz_swap_fee_bps), 1000))
 
+    @property
+    def privileged_minutes(self) -> int:
+        return max(2, min(int(self.admin_privileged_minutes), 30))
+
     def validate_runtime_security(self) -> None:
         if self.environment.lower() != "production":
             return
@@ -70,6 +80,8 @@ class Settings(BaseSettings):
             raise RuntimeError("Production NuBagz requires JWT_PRIVATE_KEY and JWT_PUBLIC_KEY")
         if not (self.jwt_audience or "").strip():
             raise RuntimeError("Production NuBagz requires JWT_AUDIENCE")
+        if not (self.admin_security_key or "").strip():
+            raise RuntimeError("Production NuBagz requires ADMIN_SECURITY_KEY")
 
 
 settings = Settings()
