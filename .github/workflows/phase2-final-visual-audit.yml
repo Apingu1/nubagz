@@ -1,0 +1,74 @@
+name: Phase 2 Final Visual Audit
+
+on:
+  pull_request:
+    branches:
+      - feature/phase2-finalisation-v2
+  workflow_dispatch:
+
+jobs:
+  visual-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Create disposable production security keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/nubagz-audit-private.pem >/dev/null 2>&1
+          openssl pkey -in /tmp/nubagz-audit-private.pem -pubout -out /tmp/nubagz-audit-public.pem >/dev/null 2>&1
+          private_key="$(awk '{printf "%s\\n", $0}' /tmp/nubagz-audit-private.pem)"
+          public_key="$(awk '{printf "%s\\n", $0}' /tmp/nubagz-audit-public.pem)"
+          {
+            echo 'JWT_ALGORITHM=RS256'
+            echo 'JWT_AUDIENCE=nubagz-api'
+            echo "JWT_PRIVATE_KEY=${private_key}"
+            echo "JWT_PUBLIC_KEY=${public_key}"
+            echo 'ADMIN_SECURITY_KEY=ci-phase2-final-visual-admin-key-not-for-production'
+            echo 'ABUSE_SIGNAL_KEY=ci-phase2-final-visual-abuse-key-not-for-production'
+          } >> "$GITHUB_ENV"
+
+      - name: Build and start production stack
+        run: docker compose up -d --build --remove-orphans
+
+      - name: Wait for NuBagz
+        shell: bash
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8080/api/health >/dev/null; then exit 0; fi
+            sleep 2
+          done
+          docker compose logs --no-color --tail=250
+          exit 1
+
+      - name: Install Playwright Chromium
+        working-directory: frontend
+        run: |
+          npm install --no-save playwright@1.55.0
+          npx playwright install --with-deps chromium
+
+      - name: Capture final Phase 2 screens
+        working-directory: frontend
+        run: node scripts/phase2-final-visual-audit.mjs
+
+      - name: Upload final visual audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-final-visual-audit
+          path: /tmp/nubagz-phase2-final-visual
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Print logs on failure
+        if: failure()
+        run: docker compose logs --no-color --tail=250
+
+      - name: Stop disposable audit stack
+        if: always()
+        run: docker compose down -v --remove-orphans
