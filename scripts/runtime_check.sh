@@ -64,7 +64,7 @@ secret = {
     'JWT_SECRET','JWT_PRIVATE_KEY','JWT_PUBLIC_KEY','PRIVY_VERIFICATION_KEY',
     'ZEROX_API_KEY','LIFI_API_KEY','SWAP_PROVIDER_API_KEY','GAS_SPONSOR_PROVIDER_API_KEY'
 }
-public = ['JWT_ALGORITHM','JWT_KEY_ID','VITE_PRIVY_APP_ID','PRIVY_APP_ID','EVM_RPC_ROBINHOOD','LIFI_INTEGRATOR','NUBAGZ_SWAP_FEE_BPS','NUBAGZ_SWAP_FEE_RECIPIENT']
+public = ['JWT_ALGORITHM','JWT_KEY_ID','JWT_AUDIENCE','VITE_PRIVY_APP_ID','PRIVY_APP_ID','EVM_RPC_ROBINHOOD','LIFI_INTEGRATOR','NUBAGZ_SWAP_FEE_BPS','NUBAGZ_SWAP_FEE_RECIPIENT']
 for key in sorted(secret):
     print(f'ENV|{key}|{"CONFIGURED" if items.get(key) else "NOT SET"}|SECRET')
 for key in public:
@@ -82,6 +82,7 @@ get_env(){
 }
 
 JWT_ALGORITHM_VALUE="$(get_env JWT_ALGORITHM)"
+JWT_AUDIENCE_VALUE="$(get_env JWT_AUDIENCE)"
 JWT_PRIVATE_KEY_VALUE="$(get_env JWT_PRIVATE_KEY)"
 JWT_PUBLIC_KEY_VALUE="$(get_env JWT_PUBLIC_KEY)"
 VITE_PRIVY_APP_ID_VALUE="$(get_env VITE_PRIVY_APP_ID)"
@@ -93,11 +94,13 @@ NUBAGZ_SWAP_FEE_BPS_VALUE="$(get_env NUBAGZ_SWAP_FEE_BPS)"
 NUBAGZ_SWAP_FEE_RECIPIENT_VALUE="$(get_env NUBAGZ_SWAP_FEE_RECIPIENT)"
 EVM_RPC_ROBINHOOD_VALUE="$(get_env EVM_RPC_ROBINHOOD)"
 
+[[ -n "$JWT_AUDIENCE_VALUE" ]] && ok "JWT audience configured as ${JWT_AUDIENCE_VALUE}." || fail 'JWT_AUDIENCE is blank.'
+
 if [[ "${JWT_ALGORITHM_VALUE^^}" == "RS256" ]]; then
   [[ -n "$JWT_PRIVATE_KEY_VALUE" ]] && ok 'RS256 private signing key configured.' || fail 'JWT_ALGORITHM=RS256 but JWT_PRIVATE_KEY is blank.'
   [[ -n "$JWT_PUBLIC_KEY_VALUE" ]] && ok 'RS256 public verification key configured.' || fail 'JWT_ALGORITHM=RS256 but JWT_PUBLIC_KEY is blank.'
 else
-  warn "JWT_ALGORITHM is ${JWT_ALGORITHM_VALUE:-unset}; RS256 is expected for the production-style Privy custom JWT flow."
+  warn "JWT_ALGORITHM is ${JWT_ALGORITHM_VALUE:-unset}; RS256 is required by production NuBagz."
 fi
 
 [[ -n "$VITE_PRIVY_APP_ID_VALUE" && -n "$PRIVY_APP_ID_VALUE" ]] && ok 'Privy frontend/backend App IDs configured.' || warn 'Privy App ID configuration is incomplete.'
