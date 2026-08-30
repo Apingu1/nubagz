@@ -10,7 +10,7 @@ from .challenge_models import Challenge, ChallengeCompletion
 from .config import settings
 from .db import Base, SessionLocal, engine
 from .models import Campaign, Mission, MissionCompletion, Project
-from .routers import access, activity, admin, auth, bagdrops, bounties, campaigns, challenges, creator, daily, dependency_security, domain_v2, earnings, funding, gas, notifications, onchain, prices, project_analytics, projects, recommendations, referrals, reports, revenue_share, reviews, risk, swaps, templates, trending, trust, users, watchbag
+from .routers import access, activity, admin, auth, bagdrops, bounties, campaigns, challenges, creator, daily, dependency_security, domain_v2, earnings, funding, gas, gas_security, notifications, onchain, prices, project_analytics, projects, recommendations, referrals, reports, revenue_share, reviews, risk, swaps, templates, trending, trust, users, watchbag
 from .seed import seed_demo
 
 
@@ -160,7 +160,7 @@ for router in (
     auth, projects, campaigns, users, admin, funding, earnings, prices, bagdrops,
     daily, onchain, trust, access, risk, referrals, bounties, revenue_share,
     recommendations, notifications, project_analytics, templates, reviews, reports,
-    activity, trending, watchbag, swaps, gas, dependency_security, challenges, domain_v2, creator,
+    activity, trending, watchbag, swaps, gas_security, gas, dependency_security, challenges, domain_v2, creator,
 ):
     app.include_router(router.router)
 
