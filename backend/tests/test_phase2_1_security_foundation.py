@@ -228,6 +228,8 @@ def test_phase1_shaped_database_upgrades_without_losing_user_wallet_or_reward_ro
         reward = connection.execute(text("SELECT amount, status FROM ledger_entries WHERE id=71")).one()
         revision = connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
         sessions = connection.execute(text("SELECT COUNT(*) FROM user_sessions")).scalar_one()
+        admin_actions = connection.execute(text("SELECT COUNT(*) FROM admin_user_actions")).scalar_one()
+        reward_holds = connection.execute(text("SELECT COUNT(*) FROM user_reward_holds")).scalar_one()
 
     assert user.email == 'preserved@example.com'
     assert user.username == 'PreservedUser'
@@ -236,5 +238,7 @@ def test_phase1_shaped_database_upgrades_without_losing_user_wallet_or_reward_ro
     assert bool(wallet.is_primary_interactive) is True
     assert float(reward.amount) == 80.0
     assert reward.status == 'PENDING_SETTLEMENT'
-    assert revision == '20260829_0002'
+    assert revision == '20260830_0003'
     assert sessions == 0
+    assert admin_actions == 0
+    assert reward_holds == 0
