@@ -1,9 +1,10 @@
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 from app.admin_security import totp_code
-from app.admin_security_models import AdminAuditEvent, AdminMfaCredential
+from app.admin_security_models import AdminAuditEvent, AdminMfaCredential, AdminPrivilegeSession
 from app.db import SessionLocal
 from app.main import app
 
@@ -24,7 +25,18 @@ def register(client):
     return response.json()['user']['id']
 
 
+@pytest.mark.no_auto_admin_privilege
 def test_phase2_5_admin_mfa_privilege_binding_and_audit():
+    # Other feature regressions deliberately use a compatibility helper that
+    # obtains real privilege for the seeded demo Admin. This dedicated test
+    # starts with no Admin MFA/privilege state so fail-closed behaviour is
+    # exercised exactly as a fresh production Admin would experience it.
+    with SessionLocal() as db:
+        db.query(AdminAuditEvent).delete()
+        db.query(AdminPrivilegeSession).delete()
+        db.query(AdminMfaCredential).delete()
+        db.commit()
+
     with TestClient(app) as client:
         admin = login(client)
         target_id = register(client)
