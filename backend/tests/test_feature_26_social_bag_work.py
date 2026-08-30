@@ -43,7 +43,7 @@ def test_free_x_oembed_verifier_checks_linked_author_proof_and_requirement():
     assert verified is False;assert evidence['reason']=='wrong_author'
 
 
-def test_unified_bag_work_requires_join_verifies_free_x_proof_and_settles_once():
+def test_unified_bag_work_requires_join_verifies_free_x_proof_and_records_reward_once():
     with TestClient(app) as client:
         creator=login(client,'creator@demo.nubagz.com','Creator123!');admin=login(client,'admin@demo.nubagz.com','Admin123!');worker_res=client.post('/api/auth/register',json={'email':'feature26-worker@example.com','username':'Feature26Worker','password':'BagWork123!'});assert worker_res.status_code==200;worker={'Authorization':f"Bearer {worker_res.json()['access_token']}"};worker_id=worker_res.json()['user']['id']
         project=client.post('/api/projects',headers=creator,json={'name':'Feature Twenty Six Work','symbol':'BW26','description':'A project used to prove the unified Bag Work and free X verification architecture.','chain':'Avalanche'});assert project.status_code==200;pid=project.json()['id'];assert client.patch(f'/api/admin/projects/{pid}',headers=admin,json={'status':'APPROVED'}).status_code==200
@@ -57,9 +57,11 @@ def test_unified_bag_work_requires_join_verifies_free_x_proof_and_settles_once()
         missing=client.post(f"/api/challenges/{social['id']}/complete",headers=worker,json={});assert missing.status_code==400
         original=challenges_router.verify_x_post_proof;challenges_router.verify_x_post_proof=lambda account,challenge,post_url,proof:(True,{'source':'TEST_X_OEMBED','author_username':account.username,'action':challenge.action,'post_url':post_url,'proof_code':proof})
         try:
-            verified=client.post(f"/api/challenges/{social['id']}/complete",headers=worker,json={'evidence':'https://x.com/feature26worker/status/123456789'});assert verified.status_code==200,verified.text;assert verified.json()['status']=='VERIFIED' and verified.json()['completed'] is False;duplicate=client.post(f"/api/challenges/{social['id']}/complete",headers=worker,json={'evidence':'https://x.com/feature26worker/status/123456789'});assert duplicate.status_code==409;final=client.post(f"/api/challenges/{quiz['id']}/complete",headers=worker,json={'answer':'BW26'});assert final.status_code==200,final.text;assert final.json()['completed'] is True
+            verified=client.post(f"/api/challenges/{social['id']}/complete",headers=worker,json={'evidence':'https://x.com/feature26worker/status/123456789'});assert verified.status_code==200,verified.text;assert verified.json()['status']=='VERIFIED' and verified.json()['completed'] is False;duplicate=client.post(f"/api/challenges/{social['id']}/complete",headers=worker,json={'evidence':'https://x.com/feature26worker/status/123456789'});assert duplicate.status_code==409;final=client.post(f"/api/challenges/{quiz['id']}/complete",headers=worker,json={'answer':'BW26'});assert final.status_code==200,final.text;assert final.json()['completed'] is True and final.json()['reward_status']=='PENDING_SETTLEMENT'
         finally: challenges_router.verify_x_post_proof=original
-        balances=client.get('/api/users/dashboard',headers=worker).json()['balances'];amount=sum(float(row['amount']) for row in balances if row['asset_symbol']=='BW26');assert amount==16;refreshed=client.get('/api/challenges',headers=worker).json();statuses={r['id']:r['completion_status'] for r in refreshed if r['campaign_id']==cid};assert statuses[social['id']]=='VERIFIED' and statuses[quiz['id']]=='VERIFIED'
+        balances=client.get('/api/users/dashboard',headers=worker).json()['balances'];amount=sum(float(row['amount']) for row in balances if row['asset_symbol']=='BW26');assert amount==0
+        earnings=client.get('/api/earnings/summary',headers=worker).json();pending=sum(float(row['amount']) for row in earnings['pending_settlement'] if row['asset']=='BW26');assert pending==16
+        refreshed=client.get('/api/challenges',headers=worker).json();statuses={r['id']:r['completion_status'] for r in refreshed if r['campaign_id']==cid};assert statuses[social['id']]=='VERIFIED' and statuses[quiz['id']]=='VERIFIED'
 
 
 def test_paid_style_x_actions_and_self_attest_are_not_accepted_for_new_bag_work():
