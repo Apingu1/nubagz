@@ -12,6 +12,11 @@ def asset_balance(client, headers, asset):
     return sum(float(r['amount']) for r in rows if r['asset_symbol']==asset)
 
 
+def pending_settlement(client, headers, asset):
+    rows=client.get('/api/earnings/summary',headers=headers).json()['pending_settlement']
+    return sum(float(r['amount']) for r in rows if r['asset']==asset)
+
+
 def treasury_balance(client, headers, asset):
     rows=client.get('/api/admin/treasury',headers=headers).json()
     return sum(float(r['amount']) for r in rows if r['asset']==asset)
@@ -30,7 +35,7 @@ def test_bagbuilder_api_is_retired_and_platform_share_is_not_diverted():
         assert project.status_code==200 and project.json()['status']=='LIVE'
         pid=project.json()['id']
         campaign=client.post('/api/campaigns',headers=creator,json={
-            'project_id':pid,'title':'Direct Participation Bag','description':'A funded Challenge Bag that settles only the user, NuBagz platform and referral/community shares.',
+            'project_id':pid,'title':'Direct Participation Bag','description':'A funded Challenge Bag that allocates only the user, NuBagz platform and referral/community shares.',
             'category':'LEARN','difficulty':'EASY','reward_asset':'BUILD11','funding_type':'TOKEN','token_allocation':100,
             'gross_reward_per_user':100,'user_share_pct':80,'nubagz_share_pct':15,'referral_share_pct':5,'max_users':1,
             'missions':[],'challenges':[{'title':'Complete direct route','description':'Finish the creator-defined quiz without a community pathway layer.','category':'LEARN','verification_type':'QUIZ','config':{'answer':'complete'},'xp_reward':10}]
@@ -50,8 +55,11 @@ def test_bagbuilder_api_is_retired_and_platform_share_is_not_diverted():
         challenge=client.get(f'/api/campaigns/{cid}').json()['challenges'][0]
         complete=client.post(f"/api/challenges/{challenge['id']}/complete",headers=participant,json={'answer':'complete'})
         assert complete.status_code==200 and complete.json()['completed'] is True
+        assert complete.json()['reward_status']=='PENDING_SETTLEMENT'
 
-        assert asset_balance(client, participant, 'BUILD11')==80
+        # Phase 2.1 deliberately separates approval from settlement.
+        assert asset_balance(client, participant, 'BUILD11')==0
+        assert pending_settlement(client, participant, 'BUILD11')==80
         assert asset_balance(client, former_builder, 'BUILD11')==0
         # 15% NuBagz platform share + the unassigned 5% referral/community share.
         assert treasury_balance(client, admin, 'BUILD11')==20
