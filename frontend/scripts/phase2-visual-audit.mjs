@@ -11,9 +11,9 @@ const context = await browser.newContext({ viewport: { width: 1440, height: 1000
 const page = await context.newPage()
 const consoleEvents = []
 page.on('console', msg => {
-  if (['error', 'warning'].includes(msg.type())) consoleEvents.push({ type: msg.type(), text: msg.text() })
+  if (['error', 'warning'].includes(msg.type())) consoleEvents.push({ type: msg.type(), text: msg.text(), url: page.url() })
 })
-page.on('pageerror', err => consoleEvents.push({ type: 'pageerror', text: String(err) }))
+page.on('pageerror', err => consoleEvents.push({ type: 'pageerror', text: String(err), url: page.url() }))
 
 async function settle() {
   await page.waitForLoadState('domcontentloaded')
@@ -36,6 +36,10 @@ async function apiLogin(email, password) {
     localStorage.setItem('nubagz_auth_source', 'password')
   }, { token: payload.access_token })
   return payload
+}
+
+async function bearer() {
+  return { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nubagz_token'))}` }
 }
 
 async function clearAuth() {
@@ -61,9 +65,31 @@ try {
   await shot('/app/bag', '15-my-bag')
   await shot('/app/studio', '16-creator-studio')
 
-  const challengeResp = await page.request.get(`${BASE}/api/challenges`, {
-    headers: { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nubagz_token'))}` },
+  const headers = await bearer()
+  const createdProject = await page.request.post(`${BASE}/api/projects`, {
+    headers,
+    data: {
+      name: 'Phase Two Visual Audit',
+      symbol: 'P2VA',
+      description: 'Disposable Project created only inside the Phase 2 visual audit production stack.',
+      website: 'https://example.com',
+      chain: 'Robinhood',
+    },
   })
+  if (!createdProject.ok()) throw new Error(`Audit Project creation failed: ${createdProject.status()} ${await createdProject.text()}`)
+  const project = await createdProject.json()
+  for (const [view, name] of [
+    ['overview', '16a-creator-project-overview'],
+    ['challenges', '16b-creator-project-challenges'],
+    ['submissions', '16c-creator-project-submissions'],
+    ['rewards', '16d-creator-project-rewards'],
+    ['trust', '16e-creator-project-trust'],
+    ['analytics', '16f-creator-project-analytics'],
+  ]) {
+    await shot(`/app/studio?project=${project.id}&view=${view}`, name)
+  }
+
+  const challengeResp = await page.request.get(`${BASE}/api/challenges`, { headers })
   if (challengeResp.ok()) {
     const data = await challengeResp.json()
     const rows = Array.isArray(data) ? data : (data.challenges || data.items || [])
