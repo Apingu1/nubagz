@@ -23,7 +23,10 @@ def add_once(db:Session,user_id:int,key:str,ntype:str,title:str,message:str,link
 def sync_user_notifications(db:Session,user:User):
     entries=db.query(LedgerEntry).filter(LedgerEntry.user_id==user.id).order_by(LedgerEntry.id.desc()).limit(100).all()
     for entry in entries:
-        label=entry.entry_type.replace("_"," ").title();add_once(db,user.id,f"ledger:{entry.id}","REWARD",f"{label} received",f"{entry.amount} {entry.asset_symbol} was added to your NuBagz balance.","/app/earnings")
+        if entry.entry_type=="CAMPAIGN_REWARD" and entry.status=="PENDING_SETTLEMENT":
+            add_once(db,user.id,f"ledger:{entry.id}","REWARD","Project Reward approved",f"{entry.amount} {entry.asset_symbol} is approved — pending settlement. No blockchain payment has been confirmed yet.","/app/bag?section=rewards")
+        else:
+            label=entry.entry_type.replace("_"," ").title();add_once(db,user.id,f"ledger:{entry.id}","REWARD",f"{label} received",f"{entry.amount} {entry.asset_symbol} was added to your available NuBagz balance.","/app/bag?section=rewards")
     projects=db.query(Project).filter(Project.owner_id==user.id).all()
     for project in projects:
         if project.status in {"LIVE","APPROVED","SUSPENDED","ARCHIVED"}:
