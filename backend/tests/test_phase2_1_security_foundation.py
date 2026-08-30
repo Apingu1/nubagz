@@ -120,7 +120,7 @@ def test_restricted_account_keeps_read_access_but_cannot_start_reward_or_swap_ac
             db.commit()
 
 
-def test_production_security_rejects_hs256_missing_rsa_or_missing_admin_key():
+def test_production_security_rejects_hs256_missing_rsa_admin_or_abuse_keys():
     insecure = Settings(
         environment='production',
         jwt_algorithm='HS256',
@@ -149,6 +149,17 @@ def test_production_security_rejects_hs256_missing_rsa_or_missing_admin_key():
     )
     with pytest.raises(RuntimeError, match='ADMIN_SECURITY_KEY'):
         missing_admin_key.validate_runtime_security()
+
+    missing_abuse_key = Settings(
+        environment='production',
+        jwt_algorithm='RS256',
+        jwt_private_key='test-private-key-present',
+        jwt_public_key='test-public-key-present',
+        admin_security_key='test-admin-key-present',
+        abuse_signal_key='',
+    )
+    with pytest.raises(RuntimeError, match='ABUSE_SIGNAL_KEY'):
+        missing_abuse_key.validate_runtime_security()
 
 
 def test_phase1_shaped_database_upgrades_without_losing_user_wallet_or_reward_rows(tmp_path):
@@ -243,6 +254,8 @@ def test_phase1_shaped_database_upgrades_without_losing_user_wallet_or_reward_ro
         mfa_credentials = connection.execute(text("SELECT COUNT(*) FROM admin_mfa_credentials")).scalar_one()
         privilege_sessions = connection.execute(text("SELECT COUNT(*) FROM admin_privilege_sessions")).scalar_one()
         admin_audit = connection.execute(text("SELECT COUNT(*) FROM admin_audit_events")).scalar_one()
+        network_observations = connection.execute(text("SELECT COUNT(*) FROM network_observations")).scalar_one()
+        security_events = connection.execute(text("SELECT COUNT(*) FROM security_events")).scalar_one()
 
     assert user.email == 'preserved@example.com'
     assert user.username == 'PreservedUser'
@@ -251,10 +264,12 @@ def test_phase1_shaped_database_upgrades_without_losing_user_wallet_or_reward_ro
     assert bool(wallet.is_primary_interactive) is True
     assert float(reward.amount) == 80.0
     assert reward.status == 'PENDING_SETTLEMENT'
-    assert revision == '20260830_0004'
+    assert revision == '20260830_0005'
     assert sessions == 0
     assert admin_actions == 0
     assert reward_holds == 0
     assert mfa_credentials == 0
     assert privilege_sessions == 0
     assert admin_audit == 0
+    assert network_observations == 0
+    assert security_events == 0

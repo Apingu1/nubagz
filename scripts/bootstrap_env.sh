@@ -39,6 +39,8 @@ SECRET_KEYS = {
     'JWT_PRIVATE_KEY',
     'JWT_PUBLIC_KEY',
     'ADMIN_SECURITY_KEY',
+    'ABUSE_SIGNAL_KEY',
+    'TURNSTILE_SECRET_KEY',
     'PRIVY_VERIFICATION_KEY',
     'ZEROX_API_KEY',
     'LIFI_API_KEY',
@@ -56,6 +58,18 @@ PORTABLE_KEYS = [
     'ADMIN_SECURITY_KEY',
     'ADMIN_PRIVILEGED_MINUTES',
     'ADMIN_REAUTH_MAX_AGE_SECONDS',
+    'ABUSE_SIGNAL_KEY',
+    'TRUST_PROXY_HEADERS',
+    'RATE_LIMIT_ENABLED',
+    'RATE_LIMIT_READ_PER_MINUTE',
+    'RATE_LIMIT_WRITE_PER_MINUTE',
+    'RATE_LIMIT_AUTH_PER_MINUTE',
+    'RATE_LIMIT_AUTH_PER_15_MINUTES',
+    'RATE_LIMIT_CREDENTIAL_PER_MINUTE',
+    'RATE_LIMIT_VALUE_PER_MINUTE',
+    'TURNSTILE_SECRET_KEY',
+    'TURNSTILE_SITE_KEY',
+    'VITE_TURNSTILE_SITE_KEY',
     'VITE_PRIVY_APP_ID',
     'VITE_PRIVY_CLIENT_ID',
     'PRIVY_APP_ID',
@@ -123,7 +137,7 @@ example_index = index(example_lines)
 env_index = index(env_lines)
 changed = []
 
-for key, (source_i, source_value) in example_index.items():
+for key, (_, source_value) in example_index.items():
     if key not in env_index:
         env_lines.append(f'{key}={source_value}')
         env_index = index(env_lines)
@@ -156,16 +170,17 @@ if not secret_value or secret_value == 'replace-with-a-long-random-production-se
     env_index = index(env_lines)
     changed.append('JWT_SECRET:generated')
 
-admin_key = env_index.get('ADMIN_SECURITY_KEY')
-admin_key_value = clean_value(admin_key[1]) if admin_key else ''
-if not admin_key_value:
-    generated = secrets.token_urlsafe(48)
-    if admin_key:
-        env_lines[admin_key[0]] = f'ADMIN_SECURITY_KEY={generated}'
-    else:
-        env_lines.append(f'ADMIN_SECURITY_KEY={generated}')
-    env_index = index(env_lines)
-    changed.append('ADMIN_SECURITY_KEY:generated')
+for generated_key in ('ADMIN_SECURITY_KEY', 'ABUSE_SIGNAL_KEY'):
+    current = env_index.get(generated_key)
+    current_value = clean_value(current[1]) if current else ''
+    if not current_value:
+        generated = secrets.token_urlsafe(48)
+        if current:
+            env_lines[current[0]] = f'{generated_key}={generated}'
+        else:
+            env_lines.append(f'{generated_key}={generated}')
+        env_index = index(env_lines)
+        changed.append(f'{generated_key}:generated')
 
 env_path.write_text('\n'.join(env_lines) + '\n')
 try:

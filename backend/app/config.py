@@ -23,6 +23,25 @@ class Settings(BaseSettings):
     admin_privileged_minutes: int = 10
     admin_reauth_max_age_seconds: int = 300
 
+    # Phase 2.6 anti-abuse foundation. ABUSE_SIGNAL_KEY HMACs network/device
+    # observations so raw IP addresses and cross-site fingerprints are not stored.
+    abuse_signal_key: str | None = None
+    trust_proxy_headers: bool = False
+    rate_limit_enabled: bool = True
+    rate_limit_read_per_minute: int = 300
+    rate_limit_write_per_minute: int = 120
+    rate_limit_auth_per_minute: int = 12
+    rate_limit_auth_per_15_minutes: int = 40
+    rate_limit_credential_per_minute: int = 20
+    rate_limit_value_per_minute: int = 45
+
+    # Optional Cloudflare Turnstile escalation. When configured, a human proof can
+    # release one throttled auth/general write request. It never bypasses wallet,
+    # swap, gas or Challenge value-action throttles.
+    turnstile_secret_key: str | None = None
+    turnstile_site_key: str | None = None
+    turnstile_verify_url: str = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+
     # EVM RPCs. Robinhood Chain is the primary NuBagz network. Its official
     # public RPC is useful for development but a dedicated provider is still
     # recommended for production throughput.
@@ -82,6 +101,8 @@ class Settings(BaseSettings):
             raise RuntimeError("Production NuBagz requires JWT_AUDIENCE")
         if not (self.admin_security_key or "").strip():
             raise RuntimeError("Production NuBagz requires ADMIN_SECURITY_KEY")
+        if not (self.abuse_signal_key or "").strip():
+            raise RuntimeError("Production NuBagz requires ABUSE_SIGNAL_KEY")
 
 
 settings = Settings()
