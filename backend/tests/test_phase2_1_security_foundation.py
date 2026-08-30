@@ -75,6 +75,51 @@ def test_suspended_account_invalidates_an_already_issued_session_without_deletin
             db.commit()
 
 
+def test_restricted_account_keeps_read_access_but_cannot_start_reward_or_swap_actions():
+    with TestClient(app) as client:
+        signup = client.post('/api/auth/register', json={
+            'email': 'phase2-1-restricted@example.com',
+            'username': 'Phase21Restricted',
+            'password': 'Phase21Security123!',
+        })
+        assert signup.status_code == 200, signup.text
+        user_id = signup.json()['user']['id']
+        headers = {'Authorization': f"Bearer {signup.json()['access_token']}"}
+
+        with SessionLocal() as db:
+            user = db.get(User, user_id)
+            user.account_state = 'RESTRICTED'
+            db.commit()
+
+        # Restricted users retain access to their own account/history surfaces.
+        me = client.get('/api/auth/me', headers=headers)
+        assert me.status_code == 200
+        assert me.json()['account_state'] == 'RESTRICTED'
+        assert client.get('/api/earnings/summary', headers=headers).status_code == 200
+
+        # Capability gates run before route-specific resource/wallet validation.
+        join = client.post('/api/challenges/999999/join', headers=headers)
+        assert join.status_code == 403
+        assert 'restricted' in join.json()['detail'].lower()
+        complete = client.post('/api/challenges/999999/complete', headers=headers, json={})
+        assert complete.status_code == 403
+        assert 'restricted' in complete.json()['detail'].lower()
+        swap = client.post('/api/swaps/quote', headers=headers, json={
+            'chain': 'Robinhood',
+            'sell_token': 'native',
+            'buy_token': '0x1111111111111111111111111111111111111111',
+            'sell_amount': '1',
+            'slippage_bps': 100,
+        })
+        assert swap.status_code == 403
+        assert 'restricted' in swap.json()['detail'].lower()
+
+        with SessionLocal() as db:
+            user = db.get(User, user_id)
+            user.account_state = 'ACTIVE'
+            db.commit()
+
+
 def test_production_security_rejects_hs256_or_missing_rsa_keys():
     insecure = Settings(
         environment='production',
