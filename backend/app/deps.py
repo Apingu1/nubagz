@@ -5,6 +5,7 @@ from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 
 from .account_policy import AUTHENTICATE, EARN_REWARDS, SWAP, allows, require_capability
+from .admin_permissions import has_permission, permission_for_request
 from .admin_security import PRIVILEGE_HEADER, record_admin_audit, require_active_privilege
 from .db import get_db
 from .models import User, UserSession
@@ -65,6 +66,7 @@ def get_current_user(request: Request, session: UserSession = Depends(get_curren
 
 
 def require_admin_basic(user: User = Depends(get_current_user)) -> User:
+    """Strict full-Admin guard used by the Admin's own security/MFA surface."""
     if user.role != "ADMIN":
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
@@ -77,18 +79,27 @@ def require_admin(
     db: Session = Depends(get_db),
     privilege_token: str | None = Header(default=None, alias=PRIVILEGE_HEADER),
 ) -> User:
-    admin = require_admin_basic(user)
+    permission = permission_for_request(request.url.path, request.method)
+    if not has_permission(user, permission):
+        raise HTTPException(status_code=403, detail=f"Admin permission required: {permission}")
+
     unsafe = request.method.upper() not in {"GET", "HEAD", "OPTIONS"}
     privilege = None
     if unsafe:
-        privilege = require_active_privilege(db, admin, session, privilege_token, request)
+        # Narrow SUPPORT is read-only in Phase 2, therefore all unsafe requests
+        # reaching here are full Admin operations and require the Phase 2.5 step-up.
+        privilege = require_active_privilege(db, user, session, privilege_token, request)
     record_admin_audit(
         db,
-        admin.id,
+        user.id,
         "ADMIN_ROUTE_ACCESS",
         user_session_id=session.session_id,
         privilege_session_id=privilege.id if privilege else None,
         request=request,
-        details={"privileged_required": unsafe, "privileged": bool(privilege)},
+        details={
+            "permission": permission,
+            "privileged_required": unsafe,
+            "privileged": bool(privilege),
+        },
     )
-    return admin
+    return user
