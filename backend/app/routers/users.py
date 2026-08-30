@@ -6,6 +6,7 @@ from sqlalchemy import func
 from eth_account import Account
 from eth_account.messages import encode_defunct
 from sqlalchemy.orm import Session
+from ..admin_user_models import UserRewardHold
 from ..db import get_db
 from ..deps import get_current_user
 from ..models import User, LedgerEntry, Enrollment, Withdrawal, WalletConnection, WalletChallenge, PayoutAddress
@@ -45,6 +46,9 @@ def leaderboard(db:Session=Depends(get_db)):
 
 @router.post("/withdrawals")
 def request_withdrawal(data:WithdrawalIn, db:Session=Depends(get_db), user:User=Depends(get_current_user)):
+    reward_hold=db.query(UserRewardHold.id).filter(UserRewardHold.user_id==user.id,UserRewardHold.status=="ACTIVE").first()
+    if reward_hold:
+        raise HTTPException(403,"Rewards are temporarily held while this account is under Admin review")
     known_wallet=db.query(WalletConnection).filter(WalletConnection.user_id==user.id,func.lower(WalletConnection.address)==data.wallet_address.lower(),WalletConnection.verified_at.isnot(None)).first()
     known_payout=db.query(PayoutAddress).filter(PayoutAddress.user_id==user.id,PayoutAddress.address==data.wallet_address,PayoutAddress.chain==data.chain).first()
     if not known_wallet and not known_payout:
