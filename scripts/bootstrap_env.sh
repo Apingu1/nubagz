@@ -38,6 +38,7 @@ SECRET_KEYS = {
     'JWT_SECRET',
     'JWT_PRIVATE_KEY',
     'JWT_PUBLIC_KEY',
+    'ADMIN_SECURITY_KEY',
     'PRIVY_VERIFICATION_KEY',
     'ZEROX_API_KEY',
     'LIFI_API_KEY',
@@ -52,6 +53,9 @@ PORTABLE_KEYS = [
     'JWT_AUDIENCE',
     'JWT_PRIVATE_KEY',
     'JWT_PUBLIC_KEY',
+    'ADMIN_SECURITY_KEY',
+    'ADMIN_PRIVILEGED_MINUTES',
+    'ADMIN_REAUTH_MAX_AGE_SECONDS',
     'VITE_PRIVY_APP_ID',
     'VITE_PRIVY_CLIENT_ID',
     'PRIVY_APP_ID',
@@ -91,8 +95,6 @@ def clean_value(value: str) -> str:
 
 
 def encode_value(value: str) -> str:
-    # Codespaces secrets can contain real PEM newlines. NuBagz's runtime already
-    # converts literal \n back to PEM newlines when loading JWT keys.
     value = value.replace('\r\n', '\n').replace('\r', '\n').replace('\n', r'\n')
     if any(ch.isspace() for ch in value) or '#' in value:
         return "'" + value.replace("'", "'\"'\"'") + "'"
@@ -121,17 +123,12 @@ example_index = index(example_lines)
 env_index = index(env_lines)
 changed = []
 
-# Forward-fill keys newly introduced in later branches without touching existing
-# non-blank local values.
 for key, (source_i, source_value) in example_index.items():
     if key not in env_index:
         env_lines.append(f'{key}={source_value}')
         env_index = index(env_lines)
         changed.append(f'{key}:schema')
 
-# Import values exposed to the Codespace/process environment. By default this
-# only fills blank/missing values, so branch switching cannot overwrite a known
-# working .env. --refresh-from-env is explicit opt-in replacement.
 for key in PORTABLE_KEYS:
     incoming = os.environ.get(key)
     if incoming is None or incoming == '':
@@ -148,7 +145,6 @@ for key in PORTABLE_KEYS:
     env_index = index(env_lines)
     changed.append(f'{key}:environment')
 
-# A fresh local HS256 setup should never inherit the example placeholder.
 current_secret = env_index.get('JWT_SECRET')
 secret_value = clean_value(current_secret[1]) if current_secret else ''
 if not secret_value or secret_value == 'replace-with-a-long-random-production-secret':
@@ -159,6 +155,17 @@ if not secret_value or secret_value == 'replace-with-a-long-random-production-se
         env_lines.insert(0, f'JWT_SECRET={generated}')
     env_index = index(env_lines)
     changed.append('JWT_SECRET:generated')
+
+admin_key = env_index.get('ADMIN_SECURITY_KEY')
+admin_key_value = clean_value(admin_key[1]) if admin_key else ''
+if not admin_key_value:
+    generated = secrets.token_urlsafe(48)
+    if admin_key:
+        env_lines[admin_key[0]] = f'ADMIN_SECURITY_KEY={generated}'
+    else:
+        env_lines.append(f'ADMIN_SECURITY_KEY={generated}')
+    env_index = index(env_lines)
+    changed.append('ADMIN_SECURITY_KEY:generated')
 
 env_path.write_text('\n'.join(env_lines) + '\n')
 try:

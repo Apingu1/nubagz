@@ -4,11 +4,13 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 import app.routers.challenges as challenge_router
+from admin_helpers import privileged_admin_headers
 
 
 def login(client,email,password):
     r=client.post('/api/auth/login',json={'email':email,'password':password});assert r.status_code==200
-    return {'Authorization':f"Bearer {r.json()['access_token']}"}
+    headers={'Authorization':f"Bearer {r.json()['access_token']}"}
+    return privileged_admin_headers(client,headers,password) if email=='admin@demo.nubagz.com' else headers
 
 
 def register(client,email,username):
