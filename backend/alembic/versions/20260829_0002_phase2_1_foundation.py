@@ -101,6 +101,23 @@ def upgrade() -> None:
             WHERE entry_type = 'CAMPAIGN_REWARD' AND status = 'AVAILABLE'
         """)
 
+    # Notifications generated before this migration may have described those
+    # same compatibility rewards as "received". Rewrite only the notifications
+    # tied to affected Project Reward ledger rows; do not alter other rewards.
+    if "notifications" in tables and "ledger_entries" in tables:
+        op.execute("""
+            UPDATE notifications
+            SET title = 'Project Reward approved',
+                message = 'This Project Reward is approved — pending settlement. No blockchain payment has been confirmed yet.',
+                link_path = '/app/bag?section=rewards'
+            WHERE dedupe_key IN (
+                SELECT 'ledger:' || CAST(id AS TEXT)
+                FROM ledger_entries
+                WHERE entry_type = 'CAMPAIGN_REWARD'
+                  AND status = 'PENDING_SETTLEMENT'
+            )
+        """)
+
 
 def downgrade() -> None:
     # Forward-only safety migration. Removing account/session semantics or
