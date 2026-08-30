@@ -101,15 +101,13 @@ jobs:
           set -euo pipefail
           openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/nubagz-ci-private.pem >/dev/null 2>&1
           openssl pkey -in /tmp/nubagz-ci-private.pem -pubout -out /tmp/nubagz-ci-public.pem >/dev/null 2>&1
+          private_key="$(awk '{printf "%s\\n", $0}' /tmp/nubagz-ci-private.pem)"
+          public_key="$(awk '{printf "%s\\n", $0}' /tmp/nubagz-ci-public.pem)"
           {
             echo 'JWT_ALGORITHM=RS256'
             echo 'JWT_AUDIENCE=nubagz-api'
-            echo 'JWT_PRIVATE_KEY<<NUBAGZ_PRIVATE_EOF'
-            cat /tmp/nubagz-ci-private.pem
-            echo 'NUBAGZ_PRIVATE_EOF'
-            echo 'JWT_PUBLIC_KEY<<NUBAGZ_PUBLIC_EOF'
-            cat /tmp/nubagz-ci-public.pem
-            echo 'NUBAGZ_PUBLIC_EOF'
+            echo "JWT_PRIVATE_KEY=${private_key}"
+            echo "JWT_PUBLIC_KEY=${public_key}"
           } >> "$GITHUB_ENV"
 
       - name: Build and start the real production stack
