@@ -5,7 +5,7 @@ from ..challenge_dependencies import dependency_preflight, require_server_depend
 from ..challenge_models import Challenge
 from ..db import get_db
 from ..deps import get_current_user
-from ..models import User
+from ..models import Campaign, Project, User
 from ..schemas import ChallengeCompleteIn
 from . import challenges as challenge_routes
 from . import domain_v2 as domain_routes
@@ -20,6 +20,13 @@ def _attach_preflight(db: Session, user: User, row: dict) -> dict:
         row = dict(row)
         row["dependency_preflight"] = dependency_preflight(db, user, challenge)
     return row
+
+
+def _submission_project_id(db: Session, challenge_id: int) -> int | None:
+    challenge = db.get(Challenge, challenge_id)
+    campaign = db.get(Campaign, challenge.campaign_id) if challenge else None
+    project = db.get(Project, campaign.project_id) if campaign else None
+    return project.id if project else None
 
 
 @router.get("/api/challenges")
@@ -43,6 +50,18 @@ def dependency_aware_campaign_bag_work(
     payload = dict(payload)
     payload["challenges"] = [_attach_preflight(db, user, row) for row in payload.get("challenges", [])]
     return payload
+
+
+@router.get("/api/challenges/submissions/project")
+def dependency_aware_project_submissions(
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    rows = challenge_routes.project_submissions(db=db, user=user)
+    return [
+        {**row, "project_id": _submission_project_id(db, int(row["challenge_id"]))}
+        for row in rows
+    ]
 
 
 @router.get("/api/challenges/{challenge_id}")
