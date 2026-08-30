@@ -30,14 +30,19 @@ async function clearAuth() { await page.goto(BASE, { waitUntil: 'domcontentloade
 
 try {
   await apiLogin('demo@demo.nubagz.com', 'Demo123!')
-  await shot('/app/studio', '01-creator-project-list')
+  await shot('/app/studio', '01-creator-project-list-empty')
   const headers = await bearer()
   const createdProject = await page.request.post(`${BASE}/api/projects`, { headers, data: { name: 'Phase Two Final Visual Audit', symbol: 'P2FV', description: 'Disposable Project created only inside the final Phase 2 visual audit production stack.', website: 'https://example.com', chain: 'Robinhood' } })
   if (!createdProject.ok()) throw new Error(`Audit Project creation failed: ${createdProject.status()} ${await createdProject.text()}`)
   const project = await createdProject.json()
+  await shot('/app/studio', '01b-creator-project-list-populated')
   for (const [view, name] of [
     ['overview','02-control-room-overview'],['challenges','03-control-room-challenges'],['submissions','04-control-room-submissions'],['rewards','05-control-room-rewards'],['trust','06-control-room-trust'],['analytics','07-control-room-analytics'],
   ]) await shot(`/app/studio?project=${project.id}&view=${view}`, name)
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await shot(`/app/studio?project=${project.id}&view=overview`, '08-control-room-mobile', false)
+  await page.setViewportSize({ width: 1440, height: 1000 })
 
   await clearAuth(); await apiLogin('admin@demo.nubagz.com', 'Admin123!')
   await shot('/app/admin/users', '10-admin-users')
@@ -45,7 +50,6 @@ try {
   await shot('/app/admin/security', '12-admin-security')
 
   await page.setViewportSize({ width: 390, height: 844 })
-  await shot(`/app/studio?project=${project.id}&view=overview`, '20-control-room-mobile', false)
   await shot('/app/admin/users', '21-admin-users-mobile', false)
 
   await fs.writeFile(path.join(OUT, 'console-events.json'), JSON.stringify(consoleEvents, null, 2))
