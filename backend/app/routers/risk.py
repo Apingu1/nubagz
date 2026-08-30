@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy import func
 from sqlalchemy.orm import Session
+from ..admin_user_models import AdminUserAction
 from ..config import settings
 from ..db import get_db
 from ..deps import get_current_user, require_admin
@@ -21,7 +22,7 @@ AUTO_SIGNAL_TYPES = {
 
 class TrustLevelIn(BaseModel):
     trust_level: str
-    note: str = Field(default="", max_length=2000)
+    note: str = Field(min_length=8, max_length=2000)
 
 
 class DeviceContextIn(BaseModel):
@@ -217,12 +218,23 @@ def set_trust(user_id: int, data: TrustLevelIn, db: Session = Depends(get_db), a
     level = data.trust_level.upper()
     if level not in {"NORMAL", "VERIFIED", "REVIEW", "RESTRICTED"}:
         raise HTTPException(400, "Invalid trust level")
-    if not db.get(User, user_id):
+    target = db.get(User, user_id)
+    if not target:
         raise HTTPException(404, "User not found")
     profile = get_or_create_profile(db, user_id)
+    before = {"trust_level": profile.trust_level, "risk_score": int(profile.risk_score), "account_state": target.account_state}
     profile.trust_level = level
     profile.reviewed_by_id = admin.id
     profile.updated_at = datetime.now(UTC)
-    db.add(RiskReview(user_id=user_id, reviewed_by_id=admin.id, trust_level=level, note=data.note.strip()))
+    note = data.note.strip()
+    db.add(RiskReview(user_id=user_id, reviewed_by_id=admin.id, trust_level=level, note=note))
+    db.add(AdminUserAction(
+        admin_user_id=admin.id,
+        target_user_id=user_id,
+        action_type="TRUST_CORRECTED_COMPAT",
+        reason=note,
+        before_state=before,
+        after_state={"trust_level": level, "risk_score": int(profile.risk_score), "account_state": target.account_state},
+    ))
     db.commit()
     return payload(db, profile)

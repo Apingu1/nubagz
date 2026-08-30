@@ -4,13 +4,13 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 
-from . import challenge_models, economy_models, engagement_models, integration_models, marketplace_models, risk_models, security_models, trust_models  # noqa: F401
+from . import admin_user_models, challenge_models, economy_models, engagement_models, integration_models, marketplace_models, risk_models, security_models, trust_models  # noqa: F401
 from .bag_lifecycle import reconcile_verified_drafts
 from .challenge_models import Challenge, ChallengeCompletion
 from .config import settings
 from .db import Base, SessionLocal, engine
 from .models import Campaign, Mission, MissionCompletion, Project
-from .routers import access, activity, admin, auth, bagdrops, bounties, campaigns, challenges, creator, daily, dependency_security, domain_v2, earnings, funding, gas, gas_security, notifications, onchain, prices, project_analytics, projects, recommendations, referrals, reports, revenue_share, reviews, risk, swaps, templates, trending, trust, users, watchbag
+from .routers import access, activity, admin, admin_users, auth, bagdrops, bounties, campaigns, challenges, creator, daily, dependency_security, domain_v2, earnings, funding, gas, gas_security, notifications, onchain, prices, project_analytics, projects, recommendations, referrals, reports, revenue_share, reviews, risk, swaps, templates, trending, trust, users, watchbag
 from .seed import seed_demo
 
 
@@ -148,7 +148,7 @@ async def lifespan(_: FastAPI):
     yield
 
 
-app = FastAPI(title=settings.app_name, version="1.31.0", lifespan=lifespan)
+app = FastAPI(title=settings.app_name, version="1.32.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.cors_origin_list,
@@ -157,7 +157,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 for router in (
-    auth, projects, campaigns, users, admin, funding, earnings, prices, bagdrops,
+    auth, projects, campaigns, users, admin, admin_users, funding, earnings, prices, bagdrops,
     daily, onchain, trust, access, risk, referrals, bounties, revenue_share,
     recommendations, notifications, project_analytics, templates, reviews, reports,
     activity, trending, watchbag, swaps, gas_security, gas, dependency_security, challenges, domain_v2, creator,
@@ -167,4 +167,4 @@ for router in (
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "service": "nubagz-api", "version": "1.31.0"}
+    return {"status": "ok", "service": "nubagz-api", "version": "1.32.0"}
