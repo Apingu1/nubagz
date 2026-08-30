@@ -2,11 +2,22 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
 export class ApiError extends Error { constructor(public status:number, message:string){super(message)} }
 
+const ADMIN_PRIVILEGE_KEY='nubagz_admin_privilege'
+
+export function setAdminPrivilege(token:string|null){
+  if(token) sessionStorage.setItem(ADMIN_PRIVILEGE_KEY,token)
+  else sessionStorage.removeItem(ADMIN_PRIVILEGE_KEY)
+}
+
+export function getAdminPrivilege(){return sessionStorage.getItem(ADMIN_PRIVILEGE_KEY)}
+
 function authHeaders(options:RequestInit = {}){
   const token = localStorage.getItem('nubagz_token')
+  const adminPrivilege = getAdminPrivilege()
   const headers = new Headers(options.headers || {})
   if (!headers.has('Content-Type') && options.body) headers.set('Content-Type','application/json')
   if (token) headers.set('Authorization', `Bearer ${token}`)
+  if (adminPrivilege) headers.set('X-NuBagz-Admin-Privilege', adminPrivilege)
   return headers
 }
 
