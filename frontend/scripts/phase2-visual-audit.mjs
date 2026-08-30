@@ -1,0 +1,89 @@
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import { chromium } from 'playwright'
+
+const BASE = process.env.NUBAGZ_AUDIT_BASE_URL || 'http://127.0.0.1:8080'
+const OUT = process.env.NUBAGZ_AUDIT_OUT || '/tmp/nubagz-phase2-visual'
+await fs.mkdir(OUT, { recursive: true })
+
+const browser = await chromium.launch({ headless: true })
+const context = await browser.newContext({ viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 })
+const page = await context.newPage()
+const consoleEvents = []
+page.on('console', msg => {
+  if (['error', 'warning'].includes(msg.type())) consoleEvents.push({ type: msg.type(), text: msg.text() })
+})
+page.on('pageerror', err => consoleEvents.push({ type: 'pageerror', text: String(err) }))
+
+async function settle() {
+  await page.waitForLoadState('domcontentloaded')
+  await page.waitForTimeout(900)
+}
+
+async function shot(urlPath, name, fullPage = true) {
+  await page.goto(`${BASE}${urlPath}`, { waitUntil: 'domcontentloaded' })
+  await settle()
+  await page.screenshot({ path: path.join(OUT, `${name}.png`), fullPage })
+}
+
+async function apiLogin(email, password) {
+  const response = await page.request.post(`${BASE}/api/auth/login`, { data: { email, password } })
+  if (!response.ok()) throw new Error(`Login failed for ${email}: ${response.status()} ${await response.text()}`)
+  const payload = await response.json()
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' })
+  await page.evaluate(({ token }) => {
+    localStorage.setItem('nubagz_token', token)
+    localStorage.setItem('nubagz_auth_source', 'password')
+  }, { token: payload.access_token })
+  return payload
+}
+
+async function clearAuth() {
+  await page.goto(BASE, { waitUntil: 'domcontentloaded' })
+  await page.evaluate(() => {
+    localStorage.removeItem('nubagz_token')
+    localStorage.removeItem('nubagz_auth_source')
+    sessionStorage.clear()
+  })
+}
+
+try {
+  await clearAuth()
+  await shot('/login', '01-login-desktop')
+  await shot('/register', '02-register-desktop')
+
+  await apiLogin('demo@demo.nubagz.com', 'Demo123!')
+  await shot('/app', '10-user-home')
+  await shot('/app/work', '11-bag-work')
+  await shot('/app/account-trust', '12-my-trust')
+  await shot('/wallet-setup', '13-wallet-reward-setup')
+  await shot('/app/swaps', '14-swaps')
+  await shot('/app/bag', '15-my-bag')
+  await shot('/app/studio', '16-creator-studio')
+
+  const challengeResp = await page.request.get(`${BASE}/api/challenges`, {
+    headers: { Authorization: `Bearer ${await page.evaluate(() => localStorage.getItem('nubagz_token'))}` },
+  })
+  if (challengeResp.ok()) {
+    const data = await challengeResp.json()
+    const rows = Array.isArray(data) ? data : (data.challenges || data.items || [])
+    const first = rows.find(row => row?.id)
+    if (first) await shot(`/app/challenges/${first.id}`, '17-challenge-dependency-detail')
+  }
+
+  await clearAuth()
+  await apiLogin('admin@demo.nubagz.com', 'Admin123!')
+  await shot('/app/admin', '20-admin-overview')
+  await shot('/app/admin/users', '21-admin-users-trust')
+  await shot('/app/admin/users/1', '22-admin-user-detail')
+  await shot('/app/admin/security', '23-admin-security-audit')
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await shot('/app/admin/users', '30-admin-users-mobile', false)
+  await shot('/app/account-trust', '31-my-trust-mobile', false)
+
+  await fs.writeFile(path.join(OUT, 'console-events.json'), JSON.stringify(consoleEvents, null, 2))
+  console.log(`Phase 2 visual audit screenshots written to ${OUT}`)
+} finally {
+  await browser.close()
+}
