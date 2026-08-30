@@ -39,7 +39,7 @@ function SwapExecutor({route,chain,sellToken,sellAmount,walletAddress,onMessage,
    const wallet=signer
    const provider=await wallet.getEthereumProvider();const wanted=`0x${chain.chain_id.toString(16)}`;const current=String(await provider.request({method:'eth_chainId'}))
    if(current.toLowerCase()!==wanted.toLowerCase()){
-     try{await provider.request({method:'wallet_switchEthereumChain',params:[{chainId:wanted}]})
+     try{await provider.request({method:'wallet_switchEthereumChain',params:[{chainId:wanted}]})}
      catch(error:any){if(error?.code!==4902||!chain.rpc_url)throw error;await provider.request({method:'wallet_addEthereumChain',params:[{chainId:wanted,chainName:chain.display_name,nativeCurrency:{name:chain.native_symbol,symbol:chain.native_symbol,decimals:18},rpcUrls:[chain.rpc_url],blockExplorerUrls:[chain.explorer]}]})}
    }
    if(route.requires_approval&&sellToken.address.toLowerCase()!==NATIVE&&route.allowance_target){
