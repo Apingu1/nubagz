@@ -28,7 +28,7 @@ import { useAuth } from './context/AuthContext'
 
 function Protected({children}:{children:ReactNode}){const {user,loading}=useAuth();if(loading)return <div className="boot">NUBAGZ<span>↗</span></div>;return user?<>{children}</>:<Navigate to="/login" replace/>}
 function AdminOnly({children}:{children:ReactNode}){const {user}=useAuth();return user?.role==='ADMIN'?<>{children}</>:<Navigate to="/app" replace/>}
-function AdminUsersOnly({children}:{children:ReactNode}){const {user}=useAuth();return ['ADMIN','SUPPORT'].includes(user?.role||'')?<>{children}</>:<Navigate to="/app" replace/>}
+function AdminUsersOnly({children}:{children:ReactNode}){const {user}=useAuth();if(!['ADMIN','SUPPORT'].includes(user?.role||''))return <Navigate to="/app" replace/>;return user?.role==='SUPPORT'?<div className="support-readonly-shell"><div className="support-readonly-banner"><strong>Read-only Support investigation</strong><span>You can inspect users, Trust, sessions and security history. Account, Trust, reward, session and recovery changes require a privileged Admin.</span></div>{children}</div>:<>{children}</>}
 function LegacyChallengeBuilderRedirect(){const location=useLocation();return <Navigate to={`/app/studio/challenges/new${location.search}`} replace/>}
 
 export default function App(){return <Routes>
