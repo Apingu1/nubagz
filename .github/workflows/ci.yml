@@ -80,6 +80,7 @@ jobs:
           test -f .env
           grep -q '^JWT_AUDIENCE=' .env
           grep -q '^ADMIN_SECURITY_KEY=.' .env
+          grep -q '^ABUSE_SIGNAL_KEY=.' .env
           grep -q '^ZEROX_API_KEY=' .env
           grep -q '^LIFI_API_KEY=' .env
           grep -q '^NUBAGZ_SWAP_FEE_RECIPIENT=' .env
@@ -96,7 +97,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create disposable CI RS256 and Admin security keys
+      - name: Create disposable CI RS256, Admin and abuse-signal keys
         shell: bash
         run: |
           set -euo pipefail
@@ -110,6 +111,7 @@ jobs:
             echo "JWT_PRIVATE_KEY=${private_key}"
             echo "JWT_PUBLIC_KEY=${public_key}"
             echo 'ADMIN_SECURITY_KEY=ci-phase25-admin-security-key-not-for-production'
+            echo 'ABUSE_SIGNAL_KEY=ci-phase26-abuse-signal-key-not-for-production'
           } >> "$GITHUB_ENV"
 
       - name: Build and start the real production stack
@@ -135,14 +137,14 @@ jobs:
           test "$health_code" = "200"
           grep -q '<title>NuBagz' /tmp/nubagz-root.html
           grep -q '"status":"ok"' /tmp/nubagz-health.json
-          grep -q '"version":"1.33.0"' /tmp/nubagz-health.json
+          grep -q '"version":"1.34.0"' /tmp/nubagz-health.json
 
-      - name: Verify Phase 2.5 migration state
+      - name: Verify Phase 2.6 migration state
         shell: bash
         run: |
           set -euo pipefail
-          docker compose exec -T api alembic current | grep -q '20260830_0004'
-          for table in user_sessions privy_identity_bindings admin_user_actions user_reward_holds admin_mfa_credentials admin_privilege_sessions admin_audit_events; do
+          docker compose exec -T api alembic current | grep -q '20260830_0005'
+          for table in user_sessions privy_identity_bindings admin_user_actions user_reward_holds admin_mfa_credentials admin_privilege_sessions admin_audit_events network_observations security_events; do
             test "$(docker compose exec -T db psql -U nubagz -d nubagz -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_name='${table}';" | tr -d '[:space:]')" = "1"
           done
           test "$(docker compose exec -T db psql -U nubagz -d nubagz -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_name='users' AND column_name='account_state';" | tr -d '[:space:]')" = "1"

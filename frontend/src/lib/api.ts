@@ -1,6 +1,16 @@
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api'
 
-export class ApiError extends Error { constructor(public status:number, message:string){super(message)} }
+export class ApiError extends Error {
+  code?:string
+  retryAfter?:number
+  humanVerificationRequired?:boolean
+  constructor(public status:number,message:string,payload?:Record<string,unknown>){
+    super(message)
+    this.code=typeof payload?.code==='string'?payload.code:undefined
+    this.retryAfter=typeof payload?.retry_after==='number'?payload.retry_after:undefined
+    this.humanVerificationRequired=payload?.human_verification_required===true
+  }
+}
 
 const ADMIN_PRIVILEGE_KEY='nubagz_admin_privilege'
 
@@ -23,8 +33,12 @@ function authHeaders(options:RequestInit = {}){
 
 async function apiError(res:Response){
   let message = `Request failed (${res.status})`
-  try { const data = await res.json(); message = data.detail || message } catch {}
-  return new ApiError(res.status, message)
+  let payload:Record<string,unknown>|undefined
+  try {
+    payload = await res.json()
+    if(typeof payload?.detail==='string')message=payload.detail
+  } catch {}
+  return new ApiError(res.status, message, payload)
 }
 
 export async function api<T>(path:string, options:RequestInit = {}):Promise<T>{

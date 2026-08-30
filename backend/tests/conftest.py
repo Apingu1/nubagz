@@ -5,8 +5,20 @@ from fastapi.testclient import TestClient
 
 from app.db import SessionLocal
 from app.models import User
+from app.rate_limit import limiter
 from app.security import decode_access_token
+from app.security_hardening import network_observer
 from admin_helpers import privileged_admin_headers
+
+
+@pytest.fixture(autouse=True)
+def phase26_security_isolation():
+    """Keep process-local throttle/observation caches isolated between tests."""
+    limiter.clear()
+    network_observer.clear()
+    yield
+    limiter.clear()
+    network_observer.clear()
 
 
 @pytest.fixture(autouse=True)
