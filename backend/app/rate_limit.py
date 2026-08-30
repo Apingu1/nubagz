@@ -136,7 +136,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         if blocked_rule is not None:
             captcha_configured = bool((settings.turnstile_secret_key or "").strip() and (settings.turnstile_site_key or "").strip())
-            captcha_allowed = group in {"auth", "write"}
+            supported_auth_captcha = request.url.path in {"/api/auth/login", "/api/auth/register"}
+            captcha_allowed = group == "write" or (group == "auth" and supported_auth_captcha)
             human_required = captcha_configured and captcha_allowed
             human_token = request.headers.get("x-nubagz-human-token", "")
             if human_required and human_token and await verify_turnstile(human_token, network_value):
