@@ -162,7 +162,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          for route in / /login /register /app /app/work /app/bag /app/trust /app/studio /app/swaps; do
+          for route in / /login /register /app /app/work /app/bag /app/trust /app/studio /app/swaps /app/admin /app/admin/users /app/admin/users/1; do
             code="$(curl -sS -o /tmp/spa-route.html -w '%{http_code}' "http://127.0.0.1:8080${route}")"
             echo "${route} -> ${code}"
             test "$code" = "200"
