@@ -23,6 +23,7 @@ import CreateProject from './pages/CreateProject'
 import CreateChallenge from './pages/CreateChallenge'
 import Admin from './pages/Admin'
 import AdminUsers from './pages/AdminUsers'
+import AdminSecurity from './pages/AdminSecurity'
 import { useAuth } from './context/AuthContext'
 
 function Protected({children}:{children:ReactNode}){const {user,loading}=useAuth();if(loading)return <div className="boot">NUBAGZ<span>↗</span></div>;return user?<>{children}</>:<Navigate to="/login" replace/>}
@@ -69,6 +70,7 @@ export default function App(){return <Routes>
   <Route path="admin" element={<AdminOnly><Admin/></AdminOnly>}/>
   <Route path="admin/users" element={<AdminOnly><AdminUsers/></AdminOnly>}/>
   <Route path="admin/users/:userId" element={<AdminOnly><AdminUsers/></AdminOnly>}/>
+  <Route path="admin/security" element={<AdminOnly><AdminSecurity/></AdminOnly>}/>
  </Route>
  <Route path="*" element={<Navigate to="/"/>}/>
  </Routes>}
