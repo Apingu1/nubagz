@@ -19,6 +19,7 @@ PROVIDER_TYPES = {
     "google_oauth": "GOOGLE",
     "twitter_oauth": "X",
 }
+SUPPORTED_PROVIDERS = set(PROVIDER_TYPES.values())
 
 
 def _verification_key():
@@ -161,6 +162,19 @@ def sync_social_accounts(db: Session, user: User, privy_user_id: str, accounts: 
         db.add(binding)
     else:
         binding.last_verified_at = now
+
+    present_providers = {account["provider"] for account in social}
+    # Privy's identity token is the source of truth for currently linked Google/X
+    # providers. If a supported provider is no longer present, remove the stale
+    # local linkage so a disconnected account cannot continue satisfying a
+    # dependency gate indefinitely. Historical Challenge evidence remains intact.
+    stale_rows = db.query(SocialAccount).filter(
+        SocialAccount.user_id == user.id,
+        SocialAccount.provider.in_(SUPPORTED_PROVIDERS),
+    ).all()
+    for row in stale_rows:
+        if row.provider not in present_providers:
+            db.delete(row)
 
     for account in social:
         identity_owner = db.query(SocialAccount).filter(
