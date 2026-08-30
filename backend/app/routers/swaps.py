@@ -37,7 +37,7 @@ CHAINS = {
         ],
     },
     "avalanche": {"name": "Avalanche", "display_name": "Avalanche", "chain_id": 43114, "native_symbol": "AVAX", "explorer": "https://snowtrace.io", "dexscreener": "avalanche", "wrapped_native": None, "tokens": [{"address": NATIVE_TOKEN, "symbol": "AVAX", "name": "Avalanche", "decimals": 18, "kind": "native"}]},
-    "ethereum": {"name": "Ethereum", "display_name": "Ethereum", "chain_id": 1, "native_symbol": "ETH", "explorer": "https://etherscan.io", "dexscreener": "ethereum", "wrapped_native": "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", "tokens": [{"address": NATIVE_TOKEN, "symbol": "ETH", "name": "Ether", "decimals": 18, "kind": "native"}]},
+    "ethereum": {"name": "Ethereum", "display_name": "Ethereum", "chain_id": 1, "native_symbol": "ETH", "explorer": "https://etherscan.io", "dexscreener": "ethereum", "wrapped_native": "0xC02aaA39b223FE8D0a0e5C4F27eAD9083C756Cc2", "tokens": [{"address": NATIVE_TOKEN, "symbol": "ETH", "name": "Ether", "decimals": 18, "kind": "native"}]},
     "base": {"name": "Base", "display_name": "Base", "chain_id": 8453, "native_symbol": "ETH", "explorer": "https://basescan.org", "dexscreener": "base", "wrapped_native": "0x4200000000000000000000000000000000000006", "tokens": [{"address": NATIVE_TOKEN, "symbol": "ETH", "name": "Ether", "decimals": 18, "kind": "native"}]},
     "arbitrum": {"name": "Arbitrum", "display_name": "Arbitrum", "chain_id": 42161, "native_symbol": "ETH", "explorer": "https://arbiscan.io", "dexscreener": "arbitrum", "wrapped_native": "0x82aF49447D8a07e3bd95BD0d56f35241523fBab1", "tokens": [{"address": NATIVE_TOKEN, "symbol": "ETH", "name": "Ether", "decimals": 18, "kind": "native"}]},
     "polygon": {"name": "Polygon", "display_name": "Polygon", "chain_id": 137, "native_symbol": "POL", "explorer": "https://polygonscan.com", "dexscreener": "polygon", "wrapped_native": None, "tokens": [{"address": NATIVE_TOKEN, "symbol": "POL", "name": "POL", "decimals": 18, "kind": "native"}]},
@@ -111,7 +111,7 @@ def _verified_wallet(db: Session, user: User) -> WalletConnection:
     wallet = db.query(WalletConnection).filter(
         WalletConnection.user_id == user.id,
         WalletConnection.verified_at.isnot(None),
-    ).order_by(WalletConnection.is_primary.desc(), WalletConnection.verified_at.desc()).first()
+    ).order_by(WalletConnection.is_primary_interactive.desc(), WalletConnection.verified_at.desc()).first()
     if not wallet:
         raise HTTPException(400, "Connect and verify an EVM wallet before swapping")
     return wallet
@@ -386,7 +386,7 @@ def swap_config(db: Session = Depends(get_db), user: User = Depends(get_current_
     wallet = db.query(WalletConnection).filter(
         WalletConnection.user_id == user.id,
         WalletConnection.verified_at.isnot(None),
-    ).order_by(WalletConnection.is_primary.desc(), WalletConnection.verified_at.desc()).first()
+    ).order_by(WalletConnection.is_primary_interactive.desc(), WalletConnection.verified_at.desc()).first()
     providers = {
         "0x": bool(settings.zerox_api_key and settings.nubagz_swap_fee_recipient and _valid_evm_address(settings.nubagz_swap_fee_recipient)),
         "LI.FI": bool(settings.lifi_integrator),

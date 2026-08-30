@@ -64,10 +64,15 @@ def _require_enrollment(db: Session, user: User, campaign: Campaign) -> Enrollme
     return enrollment
 
 
-def _settle_campaign(db: Session, user: User, campaign: Campaign, enrollment: Enrollment) -> None:
+def _record_reward_eligibility(db: Session, user: User, campaign: Campaign, enrollment: Enrollment) -> None:
+    """Record approved reward liability without pretending blockchain settlement occurred.
+
+    Phase 9 owns transaction submission/confirmation. Phase 2.1 only records that
+    the Project Reward is earned and pending that future settlement lifecycle.
+    """
     gross = Decimal(campaign.gross_reward_per_user)
     if not _funding_available(db, campaign, gross):
-        raise HTTPException(409, "Reward inventory was exhausted before this Bag could settle")
+        raise HTTPException(409, "Reward inventory was exhausted before this reward could be reserved")
 
     referrer_profile = None
     if user.referred_by_id:
@@ -87,7 +92,8 @@ def _settle_campaign(db: Session, user: User, campaign: Campaign, enrollment: En
         asset_symbol=campaign.reward_asset,
         amount=user_amount,
         entry_type="CAMPAIGN_REWARD",
-        note=f"Completed {campaign.title}",
+        status="PENDING_SETTLEMENT",
+        note=f"Approved Project Reward — pending settlement: {campaign.title}",
     ))
     db.add(LedgerEntry(
         user_id=None,
@@ -174,7 +180,7 @@ def _finalize_completion(
     verified_total = other_verified + 1
     will_complete = total > 0 and verified_total >= total and enrollment.status != "COMPLETED"
     if will_complete and not _funding_available(db, campaign, Decimal(campaign.gross_reward_per_user)):
-        raise HTTPException(409, "Reward inventory was exhausted before this Bag could settle")
+        raise HTTPException(409, "Reward inventory was exhausted before this reward could be reserved")
 
     now = datetime.now(UTC)
     completion.status = status
@@ -185,7 +191,7 @@ def _finalize_completion(
     user.xp += challenge.xp_reward
     user.bag_score = min(1000, user.bag_score + max(1, challenge.xp_reward // 10))
     if will_complete:
-        _settle_campaign(db, user, campaign, enrollment)
+        _record_reward_eligibility(db, user, campaign, enrollment)
     return will_complete
 
 
@@ -279,7 +285,7 @@ def _verify_onchain_transaction(
     wallet = db.query(WalletConnection).filter(
         WalletConnection.user_id == user.id,
         WalletConnection.verified_at.isnot(None),
-    ).order_by(WalletConnection.is_primary.desc(), WalletConnection.verified_at.desc()).first()
+    ).order_by(WalletConnection.is_primary_interactive.desc(), WalletConnection.verified_at.desc()).first()
     if not wallet:
         raise HTTPException(409, "Connect and verify an EVM wallet before verifying on-chain Bag Work")
 
@@ -488,7 +494,7 @@ def complete_challenge(
         if not data.evidence or not data.evidence.strip():
             raise HTTPException(400, "Add a proof link or short evidence note for project review")
         db.commit()
-        return {"ok": True, "status": "PENDING", "completed": False}
+        return {"ok": True, "status": "PENDING", "completed": False, "reward_status": None}
 
     evidence: dict = {"verification": verification}
     if verification == "QUIZ":
@@ -539,6 +545,7 @@ def complete_challenge(
         "ok": True,
         "status": "VERIFIED",
         "completed": completed_now,
+        "reward_status": "PENDING_SETTLEMENT" if completed_now else None,
         "xp": user.xp,
         "bag_score": user.bag_score,
     }
@@ -568,7 +575,7 @@ def decide_completion(
         completion.status = "REJECTED"
         completion.verified_at = datetime.now(UTC)
         db.commit()
-        return {"ok": True, "status": "REJECTED", "completed": False}
+        return {"ok": True, "status": "REJECTED", "completed": False, "reward_status": None}
     worker = db.get(User, completion.user_id)
     if not worker:
         raise HTTPException(404, "Worker account not found")
@@ -576,7 +583,7 @@ def decide_completion(
         db, worker, campaign, challenge, completion, "APPROVED", completion.evidence
     )
     db.commit()
-    return {"ok": True, "status": "APPROVED", "completed": completed_now}
+    return {"ok": True, "status": "APPROVED", "completed": completed_now, "reward_status": "PENDING_SETTLEMENT" if completed_now else None}
 
 
 @router.get("/submissions/project")

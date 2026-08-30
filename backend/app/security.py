@@ -2,6 +2,7 @@ import base64
 import hashlib
 import hmac
 import os
+import secrets
 from datetime import datetime, timedelta, timezone
 import jwt
 from .config import settings
@@ -22,12 +23,28 @@ def verify_password(password:str,stored:str)->bool:
     except Exception: return False
 
 
-def create_access_token(user_id:int,role:str)->str:
+def create_access_token(user_id:int,role:str,session_id:str)->str:
     now=datetime.now(timezone.utc); exp=now+timedelta(minutes=settings.access_token_minutes)
-    payload={"sub":str(user_id),"role":role,"iat":now,"exp":exp,"iss":"nubagz"}
+    payload={
+        "sub":str(user_id),
+        "role":role,
+        "sid":session_id,
+        "jti":secrets.token_urlsafe(24),
+        "iat":now,
+        "exp":exp,
+        "iss":"nubagz",
+        "aud":settings.jwt_audience,
+    }
     headers={"kid":settings.jwt_key_id} if settings.jwt_algorithm in {"RS256","ES256"} else None
     return jwt.encode(payload,settings.signing_key,algorithm=settings.jwt_algorithm,headers=headers)
 
 
 def decode_access_token(token:str)->dict:
-    return jwt.decode(token,settings.verification_key,algorithms=[settings.jwt_algorithm],issuer="nubagz")
+    return jwt.decode(
+        token,
+        settings.verification_key,
+        algorithms=[settings.jwt_algorithm],
+        issuer="nubagz",
+        audience=settings.jwt_audience,
+        options={"require":["sub","sid","jti","iat","exp","iss","aud"]},
+    )

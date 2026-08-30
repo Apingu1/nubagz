@@ -159,6 +159,7 @@ def earnings_summary(db: Session = Depends(get_db), user: User = Depends(get_cur
     withdrawals = db.query(Withdrawal).filter(Withdrawal.user_id == user.id).all()
 
     available = defaultdict(Decimal)
+    pending_settlement = defaultdict(Decimal)
     lifetime = defaultdict(Decimal)
     referral = defaultdict(Decimal)
     monthly = defaultdict(lambda: defaultdict(Decimal))
@@ -171,6 +172,8 @@ def earnings_summary(db: Session = Depends(get_db), user: User = Depends(get_cur
         lifetime[asset] += amount
         if entry.status == "AVAILABLE":
             available[asset] += amount
+        elif entry.status == "PENDING_SETTLEMENT":
+            pending_settlement[asset] += amount
         if entry.entry_type == "REFERRAL_SHARE":
             referral[asset] += amount
         month = entry.created_at.strftime("%Y-%m")
@@ -187,15 +190,15 @@ def earnings_summary(db: Session = Depends(get_db), user: User = Depends(get_cur
                     original_value[asset] += gross_value * Decimal(campaign.referral_share_pct) / Decimal("100")
 
     withdrawn = defaultdict(Decimal)
-    pending = defaultdict(Decimal)
+    pending_withdrawal = defaultdict(Decimal)
     for wd in withdrawals:
         asset = wd.asset_symbol.upper()
         if wd.status in {"COMPLETED", "SETTLED"}:
             withdrawn[asset] += Decimal(wd.amount)
         elif wd.status in {"PENDING", "APPROVED"}:
-            pending[asset] += Decimal(wd.amount)
+            pending_withdrawal[asset] += Decimal(wd.amount)
 
-    assets = sorted(set(lifetime) | set(withdrawn) | set(pending))
+    assets = sorted(set(lifetime) | set(withdrawn) | set(pending_withdrawal) | set(pending_settlement))
     prices = latest_prices(db)
     valuations = []
     for asset in assets:
@@ -220,7 +223,8 @@ def earnings_summary(db: Session = Depends(get_db), user: User = Depends(get_cur
     return {
         "lifetime": [{"asset": a, "amount": str(lifetime[a])} for a in assets],
         "available": [{"asset": a, "amount": str(available[a])} for a in assets if available[a]],
-        "pending": [{"asset": a, "amount": str(pending[a])} for a in assets if pending[a]],
+        "pending_settlement": [{"asset": a, "amount": str(pending_settlement[a])} for a in assets if pending_settlement[a]],
+        "pending": [{"asset": a, "amount": str(pending_withdrawal[a])} for a in assets if pending_withdrawal[a]],
         "withdrawn": [{"asset": a, "amount": str(withdrawn[a])} for a in assets if withdrawn[a]],
         "referral": [{"asset": a, "amount": str(referral[a])} for a in assets if referral[a]],
         "unique_assets": len([a for a in assets if lifetime[a] > 0]),

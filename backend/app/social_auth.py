@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from .challenge_models import SocialAccount
 from .config import settings
 from .models import User
+from .security_models import PrivyIdentityBinding
 from .security import hash_password
 from .utils import unique_referral_code
 
@@ -83,9 +84,15 @@ def normalized_social_accounts(accounts: list[dict]) -> list[dict]:
 
 def find_social_user(db: Session, privy_user_id: str, accounts: list[dict]) -> User | None:
     social = normalized_social_accounts(accounts)
-    user_ids = {
+    user_ids: set[int] = set()
+    binding = db.query(PrivyIdentityBinding).filter(PrivyIdentityBinding.privy_user_id == privy_user_id).first()
+    if binding:
+        user_ids.add(binding.user_id)
+    # Compatibility lookup for pre-2.1 records before the canonical binding has
+    # been backfilled by a successful login/link operation.
+    user_ids.update(
         row.user_id for row in db.query(SocialAccount).filter(SocialAccount.privy_user_id == privy_user_id).all()
-    }
+    )
     for account in social:
         existing = db.query(SocialAccount).filter(
             SocialAccount.provider == account["provider"],
@@ -94,7 +101,7 @@ def find_social_user(db: Session, privy_user_id: str, accounts: list[dict]) -> U
         if existing:
             user_ids.add(existing.user_id)
     if len(user_ids) > 1:
-        raise HTTPException(409, "These linked social accounts are already attached to different NuBagz users")
+        raise HTTPException(409, "These linked identities are already attached to different NuBagz users")
     return db.get(User, next(iter(user_ids))) if user_ids else None
 
 
@@ -132,6 +139,7 @@ def create_social_user(db: Session, accounts: list[dict], referred_by_id: int | 
         referral_code=unique_referral_code(db, username),
         referred_by_id=referred_by_id,
         streak_days=1,
+        account_state="ACTIVE",
     )
     db.add(user)
     db.flush()
@@ -141,6 +149,19 @@ def create_social_user(db: Session, accounts: list[dict], referred_by_id: int | 
 def sync_social_accounts(db: Session, user: User, privy_user_id: str, accounts: list[dict]) -> list[SocialAccount]:
     social = normalized_social_accounts(accounts)
     now = datetime.now(UTC)
+
+    did_owner = db.query(PrivyIdentityBinding).filter(PrivyIdentityBinding.privy_user_id == privy_user_id).first()
+    if did_owner and did_owner.user_id != user.id:
+        raise HTTPException(409, "That Privy identity is already bound to another NuBagz user")
+    binding = db.query(PrivyIdentityBinding).filter(PrivyIdentityBinding.user_id == user.id).first()
+    if binding and binding.privy_user_id != privy_user_id:
+        raise HTTPException(409, "This NuBagz account is already bound to a different Privy identity")
+    if not binding:
+        binding = PrivyIdentityBinding(user_id=user.id, privy_user_id=privy_user_id, created_at=now, last_verified_at=now)
+        db.add(binding)
+    else:
+        binding.last_verified_at = now
+
     for account in social:
         identity_owner = db.query(SocialAccount).filter(
             SocialAccount.provider == account["provider"],

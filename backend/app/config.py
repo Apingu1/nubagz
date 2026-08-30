@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     jwt_private_key: str | None = None
     jwt_public_key: str | None = None
     jwt_key_id: str = "nubagz-1"
+    jwt_audience: str = "nubagz-api"
     access_token_minutes: int = 1440
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     privy_app_id: str | None = None
@@ -59,6 +60,16 @@ class Settings(BaseSettings):
     @property
     def swap_fee_bps(self) -> int:
         return max(0, min(int(self.nubagz_swap_fee_bps), 1000))
+
+    def validate_runtime_security(self) -> None:
+        if self.environment.lower() != "production":
+            return
+        if self.jwt_algorithm.upper() != "RS256":
+            raise RuntimeError("Production NuBagz must use JWT_ALGORITHM=RS256")
+        if not (self.jwt_private_key or "").strip() or not (self.jwt_public_key or "").strip():
+            raise RuntimeError("Production NuBagz requires JWT_PRIVATE_KEY and JWT_PUBLIC_KEY")
+        if not (self.jwt_audience or "").strip():
+            raise RuntimeError("Production NuBagz requires JWT_AUDIENCE")
 
 
 settings = Settings()

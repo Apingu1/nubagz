@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import inspect, text
 
-from . import challenge_models, economy_models, engagement_models, integration_models, marketplace_models, risk_models, trust_models  # noqa: F401
+from . import challenge_models, economy_models, engagement_models, integration_models, marketplace_models, risk_models, security_models, trust_models  # noqa: F401
 from .bag_lifecycle import reconcile_verified_drafts
 from .challenge_models import Challenge, ChallengeCompletion
 from .config import settings
@@ -133,6 +133,7 @@ def backfill_legacy_missions_to_challenges(db):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    settings.validate_runtime_security()
     Base.metadata.create_all(bind=engine)
     ensure_runtime_schema()
     db = SessionLocal()

@@ -9,6 +9,9 @@ def now():
     return datetime.now(UTC)
 
 
+ACCOUNT_STATES = {"ACTIVE", "UNDER_REVIEW", "RESTRICTED", "SUSPENDED", "DISQUALIFIED"}
+
+
 class User(Base):
     __tablename__ = "users"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
@@ -21,9 +24,14 @@ class User(Base):
     streak_days: Mapped[int] = mapped_column(Integer, default=0)
     referral_code: Mapped[str] = mapped_column(String(32), unique=True, index=True)
     referred_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    # Compatibility mirror of the selected reward destination. This is not proof
+    # of wallet ownership and must never satisfy interactive-wallet requirements.
     wallet_address: Mapped[str | None] = mapped_column(String(255), nullable=True)
     wallet_chain: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # Retained during the V2 migration for compatibility with legacy queries.
+    # account_state is the authoritative V2 account lifecycle field.
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    account_state: Mapped[str] = mapped_column(String(24), default="ACTIVE", index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     last_active_at: Mapped[datetime] = mapped_column(DateTime, default=now)
 
@@ -31,6 +39,22 @@ class User(Base):
     ledger_entries = relationship("LedgerEntry", back_populates="user")
     wallet_connections = relationship("WalletConnection", back_populates="user", cascade="all, delete-orphan")
     payout_addresses = relationship("PayoutAddress", back_populates="user", cascade="all, delete-orphan")
+    sessions = relationship("UserSession", back_populates="user", cascade="all, delete-orphan")
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    auth_method: Mapped[str] = mapped_column(String(24), default="PASSWORD")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, default=now)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)
+    revoke_reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    user = relationship("User", back_populates="sessions")
 
 
 class WalletConnection(Base):
@@ -44,7 +68,10 @@ class WalletConnection(Base):
     wallet_client_type: Mapped[str] = mapped_column(String(64), default="unknown")
     connector_type: Mapped[str] = mapped_column(String(64), default="unknown")
     wallet_type: Mapped[str] = mapped_column(String(24), default="EXTERNAL")
+    # is_primary remains the selected reward destination compatibility flag.
+    # is_primary_interactive independently selects the preferred verified signer.
     is_primary: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
+    is_primary_interactive: Mapped[bool] = mapped_column(Boolean, default=False, index=True)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     last_connected_at: Mapped[datetime] = mapped_column(DateTime, default=now)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=now)

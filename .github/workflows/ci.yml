@@ -78,6 +78,7 @@ jobs:
           set -euo pipefail
           bash scripts/bootstrap_env.sh
           test -f .env
+          grep -q '^JWT_AUDIENCE=' .env
           grep -q '^ZEROX_API_KEY=' .env
           grep -q '^LIFI_API_KEY=' .env
           grep -q '^NUBAGZ_SWAP_FEE_RECIPIENT=' .env
@@ -93,6 +94,21 @@ jobs:
     needs: [backend, frontend, runtime-safety]
     steps:
       - uses: actions/checkout@v4
+
+      - name: Create disposable CI RS256 signing keys
+        shell: bash
+        run: |
+          set -euo pipefail
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out /tmp/nubagz-ci-private.pem >/dev/null 2>&1
+          openssl pkey -in /tmp/nubagz-ci-private.pem -pubout -out /tmp/nubagz-ci-public.pem >/dev/null 2>&1
+          private_key="$(awk '{printf "%s\\n", $0}' /tmp/nubagz-ci-private.pem)"
+          public_key="$(awk '{printf "%s\\n", $0}' /tmp/nubagz-ci-public.pem)"
+          {
+            echo 'JWT_ALGORITHM=RS256'
+            echo 'JWT_AUDIENCE=nubagz-api'
+            echo "JWT_PRIVATE_KEY=${private_key}"
+            echo "JWT_PUBLIC_KEY=${public_key}"
+          } >> "$GITHUB_ENV"
 
       - name: Build and start the real production stack
         run: docker compose up -d --build --remove-orphans
@@ -117,6 +133,16 @@ jobs:
           test "$health_code" = "200"
           grep -q '<title>NuBagz' /tmp/nubagz-root.html
           grep -q '"status":"ok"' /tmp/nubagz-health.json
+
+      - name: Verify Phase 2.1 migration state
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker compose exec -T api alembic current | grep -q '20260829_0002'
+          test "$(docker compose exec -T db psql -U nubagz -d nubagz -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_name='users' AND column_name='account_state';" | tr -d '[:space:]')" = "1"
+          test "$(docker compose exec -T db psql -U nubagz -d nubagz -tAc "SELECT COUNT(*) FROM information_schema.columns WHERE table_name='wallet_connections' AND column_name='is_primary_interactive';" | tr -d '[:space:]')" = "1"
+          test "$(docker compose exec -T db psql -U nubagz -d nubagz -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_name='user_sessions';" | tr -d '[:space:]')" = "1"
+          test "$(docker compose exec -T db psql -U nubagz -d nubagz -tAc "SELECT COUNT(*) FROM information_schema.tables WHERE table_name='privy_identity_bindings';" | tr -d '[:space:]')" = "1"
 
       - name: Verify database checkpoint path
         shell: bash
